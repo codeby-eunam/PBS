@@ -1,0 +1,12 @@
+# Bite of Seattle Picks MVP
+
+Mobile-first discovery, list fetching, swipe, tournament, and sharing prototype.
+
+## Run
+
+```bash
+npm install
+npm run dev
+```
+
+Vendor data is loaded from the Supabase `public.vendors` table. Apply `supabase/vendors.sql` once to create the table, policies, and initial lineup data.
