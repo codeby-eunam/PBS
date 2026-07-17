@@ -17,7 +17,10 @@ body{line-height:1.5}.text-card b,.text-card p,.text-card small,.info p,.line sm
 
 /* Responsive app-to-web layout */
 html{min-width:320px}body{min-height:100vh}.section-content{min-width:0}
-@media(max-width:699px){main{max-width:none}.screen{padding-left:clamp(16px,4.5vw,22px);padding-right:clamp(16px,4.5vw,22px)}h1{font-size:clamp(27px,8vw,30px)}.modal-card,.list-picker,nav{max-width:none}}
+@media(max-width:699px){
+ main{max-width:none}.screen{padding-left:clamp(14px,4vw,18px);padding-right:clamp(14px,4vw,18px)}h1{font-size:clamp(27px,8vw,30px)}.modal-card,.list-picker,nav{max-width:none}
+ .section-content{display:block!important;grid-template-columns:none!important}.text-card{width:100%;min-height:72px;padding:12px 2px;gap:12px}.text-card>.placeholder{display:none}.text-card b{font-size:16px}.text-card p{font-size:14px;margin:3px 0}.text-card small{font-size:12px}.save-button{width:42px;height:42px;flex-basis:42px}.save-button svg{width:22px}
+}
 @media(min-width:700px){
  body{padding:0}main{width:100%;max-width:none;min-height:100vh;margin:0;border-radius:0;overflow:visible;box-shadow:none}
  .brand{width:min(100%,1120px);height:64px;margin:0 auto;padding:23px clamp(28px,5vw,64px) 10px;font-size:15px}.screen{width:min(100%,1120px);margin:0 auto;padding:20px clamp(28px,5vw,64px) 120px}header{margin:12px 0 26px}h1{font-size:clamp(32px,4vw,44px);letter-spacing:-1.6px}header p{font-size:14px}
