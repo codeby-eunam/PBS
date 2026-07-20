@@ -55,4 +55,10 @@ describe("Supabase security contracts", () => {
       "revoke all on function public.fetch_public_list(uuid) from public",
     );
   });
+  it("restricts vendor image writes to administrators", () => {
+    const source = sql("vendor-images.sql");
+    expect(source).toContain("bucket_id = 'vendor-images'");
+    expect(source).toContain("app_metadata' ->> 'role') = 'admin'");
+    expect(source).toContain("grant update (image_path)");
+  });
 });

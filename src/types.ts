@@ -55,6 +55,8 @@ export type Vendor = {
   instagramUrl: string | null;
   source: string;
   isActive: boolean;
+  imagePath?: string | null;
+  featuredImageUrl?: string;
 };
 export type UserList = {
   id: string;

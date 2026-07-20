@@ -1,4 +1,5 @@
-import { Bookmark, Flag, ImagePlus, Share2 } from "lucide-react";
+import { useRef, useState } from "react";
+import { Bookmark, Flag, ImagePlus, Share2, Trash2 } from "lucide-react";
 import { VendorReviews } from "../components/VendorReviews";
 import type { WaitReport } from "../features/lineReports";
 import type { CommunityPhoto, ReviewWithPhotos, Vendor } from "../types";
@@ -22,11 +23,21 @@ type Props = {
   onRefreshReviews: () => Promise<void>;
   onNotify: (message: string) => void;
   onReportIssue?: (message: string) => void;
+  canManageImage?: boolean;
+  onImageUpload?: (file: File) => Promise<void>;
+  onImageDelete?: () => Promise<void>;
 };
 
 export function VendorDetailScreen(props: Props) {
   const { vendor, photos, history } = props;
-  const hasPhotos = photos.length > 0;
+  const imageInput = useRef<HTMLInputElement>(null);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState("");
+  const galleryImages = [
+    ...(vendor.featuredImageUrl ? [vendor.featuredImageUrl] : []),
+    ...photos.map((photo) => photo.imageUrl),
+  ].slice(0, 4);
+  const hasPhotos = galleryImages.length > 0;
   return (
     <>
       <button className="back" onClick={props.onBack}>
@@ -34,11 +45,11 @@ export function VendorDetailScreen(props: Props) {
       </button>
       {hasPhotos ? (
         <div className="community-gallery">
-          {photos.slice(0, 4).map((photo, index) => (
+          {galleryImages.map((imageUrl, index) => (
             <img
-              key={`${photo.reviewId}-${index}`}
-              src={photo.imageUrl}
-              alt={`Community food photo ${index + 1}`}
+              key={`${imageUrl}-${index}`}
+              src={imageUrl}
+              alt={`${vendor.name} food photo ${index + 1}`}
             />
           ))}
         </div>
@@ -48,6 +59,59 @@ export function VendorDetailScreen(props: Props) {
       <header>
         <h1>{vendor.name}</h1>
       </header>
+      {props.canManageImage && (
+        <section className="vendor-image-admin">
+          <input
+            ref={imageInput}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (!file || !props.onImageUpload) return;
+              setImageBusy(true);
+              setImageError("");
+              void props.onImageUpload(file)
+                .catch((error: unknown) =>
+                  setImageError(
+                    error instanceof Error ? error.message : "Could not upload image.",
+                  ),
+                )
+                .finally(() => setImageBusy(false));
+            }}
+          />
+          <button
+            type="button"
+            disabled={imageBusy}
+            onClick={() => imageInput.current?.click()}
+          >
+            <ImagePlus /> {vendor.imagePath ? "Replace image" : "Upload image"}
+          </button>
+          {vendor.imagePath && props.onImageDelete && (
+            <button
+              type="button"
+              disabled={imageBusy}
+              onClick={() => {
+                if (!confirm("Delete this vendor image?")) return;
+                setImageBusy(true);
+                setImageError("");
+                void props.onImageDelete?.()
+                  .catch((error: unknown) =>
+                    setImageError(
+                      error instanceof Error ? error.message : "Could not delete image.",
+                    ),
+                  )
+                  .finally(() => setImageBusy(false));
+              }}
+            >
+              <Trash2 /> Delete image
+            </button>
+          )}
+          {imageBusy && <small>Saving image...</small>}
+          {imageError && <small className="field-error">{imageError}</small>}
+        </section>
+      )}
       <div className="vendor-facts">
         <span>
           {vendor.cuisines.join(" · ") || friendlyVendorType(vendor.vendorType)}

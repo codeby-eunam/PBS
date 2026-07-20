@@ -1,6 +1,11 @@
 import { supabase } from './supabase';
 import type { LineStatus, Vendor, VendorType } from '../types';
 
+const FEATURED_IMAGES: Record<string, string> = {
+  'bacon mania': '/vendors/bacon-mania.png',
+};
+const VENDOR_IMAGE_BUCKET = 'vendor-images';
+
 type VendorRow = {
   id: string;
   name: string;
@@ -17,6 +22,7 @@ type VendorRow = {
   source: string;
   is_active: boolean;
   sort_order: number;
+  image_path: string | null;
 };
 
 function mapRows(rows: VendorRow[]): Vendor[] {
@@ -60,6 +66,10 @@ function mapRows(rows: VendorRow[]): Vendor[] {
     instagramUrl: row.instagram_url,
     source: row.source,
     isActive: row.is_active,
+    imagePath: row.image_path,
+    featuredImageUrl: row.image_path
+      ? supabase.storage.from(VENDOR_IMAGE_BUCKET).getPublicUrl(row.image_path).data.publicUrl
+      : FEATURED_IMAGES[row.name.trim().toLocaleLowerCase()],
   }));
 }
 

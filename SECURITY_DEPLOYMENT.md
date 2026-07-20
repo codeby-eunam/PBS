@@ -30,6 +30,7 @@ Apply these SQL files in order:
 3. `supabase/review-integrity.sql`
 4. `supabase/moderation.sql`
 5. `supabase/storage-policies.sql`
+6. `supabase/vendor-images.sql`
 
 Then run `supabase/security-verification.sql`. Deployment is incomplete if any
 row returns `false` or is missing.

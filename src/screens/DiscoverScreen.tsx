@@ -38,5 +38,6 @@ export function DiscoverScreen({vendors,photos,loading,loadingMore,error,query,v
 }
 
 function VendorResult({vendor,photo,saved,open,save}:{vendor:Vendor;photo?:CommunityPhoto;saved:boolean;open:()=>void;save:()=>void}){
-  return <article className="vendor-row text-card"><button className="vendor-main" onClick={open}>{photo&&<img className="vendor-thumbnail" src={photo.imageUrl} alt="" loading="lazy"/>}<span><b>{vendor.name}</b><small>{vendor.menuItems[0]||vendor.foodTypes[0]||vendor.cuisines[0]||vendor.vendorType}</small></span><ChevronRight/></button><button className="vendor-save" aria-label={`Save ${vendor.name}`} onClick={save}><Bookmark fill={saved?"currentColor":"none"}/></button></article>;
+  const imageUrl=photo?.imageUrl??vendor.featuredImageUrl;
+  return <article className="vendor-row text-card"><button className="vendor-main" onClick={open}>{imageUrl&&<img className="vendor-thumbnail" src={imageUrl} alt="" loading="lazy"/>}<span><b>{vendor.name}</b><small>{vendor.menuItems[0]||vendor.foodTypes[0]||vendor.cuisines[0]||vendor.vendorType}</small></span><ChevronRight/></button><button className="vendor-save" aria-label={`Save ${vendor.name}`} onClick={save}><Bookmark fill={saved?"currentColor":"none"}/></button></article>;
 }

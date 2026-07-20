@@ -28,4 +28,15 @@ select 'community_photos_delete_policy', exists (
   select 1 from pg_policies
   where schemaname = 'storage' and tablename = 'objects'
     and policyname = 'Users can delete their community photos'
+)
+union all
+select 'vendor_images_bucket', exists (
+  select 1 from storage.buckets
+  where id = 'vendor-images' and public and file_size_limit = 5242880
+)
+union all
+select 'vendor_images_admin_upload_policy', exists (
+  select 1 from pg_policies
+  where schemaname = 'storage' and tablename = 'objects'
+    and policyname = 'Admins can upload vendor images'
 );

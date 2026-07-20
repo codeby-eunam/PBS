@@ -70,6 +70,19 @@ export function useVendorCatalog() {
     if (offset < total) void loadPage(offset);
   }, [loadPage, offset, total]);
 
+  const setVendorImage = useCallback(
+    (vendorId: string, imagePath: string | null, featuredImageUrl?: string) => {
+      setVendors((current) =>
+        current.map((vendor) =>
+          vendor.id === vendorId
+            ? { ...vendor, imagePath, featuredImageUrl }
+            : vendor,
+        ),
+      );
+    },
+    [],
+  );
+
   const vendorMap = useMemo(
     () => new Map(vendors.map((vendor) => [vendor.id, vendor])),
     [vendors],
@@ -84,5 +97,6 @@ export function useVendorCatalog() {
     loadingMore,
     error,
     loadMore,
+    setVendorImage,
   };
 }

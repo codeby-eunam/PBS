@@ -25,6 +25,7 @@ import { useVendorReviews } from "./hooks/useVendorReviews";
 import { useGameFlow } from "./hooks/useGameFlow";
 import { useRemoteLists } from "./hooks/useRemoteLists";
 import { readStorage, usePersistentState, writeStorage } from "./lib/storage";
+import { deleteVendorImage, uploadVendorImage } from "./lib/vendorImages";
 import {
   cleanIssues,
   cleanLists,
@@ -217,6 +218,7 @@ function App() {
     loadingMore: vendorsLoadingMore,
     error: vendorsError,
     loadMore: loadRemainingVendors,
+    setVendorImage,
   } = useVendorCatalog();
   const [visibleVendorCount, setVisibleVendorCount] = useState(10);
   const vendorLoadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -760,6 +762,17 @@ function App() {
         photoUploadsOpen={photoUploadsOpen}
         lineReportsOpen={lineReportsOpen}
         onLineReport={reportLine}
+        canManageImage={user?.app_metadata.role === "admin"}
+        onImageUpload={async (file) => {
+          const result = await uploadVendorImage(vendor.id, vendor.imagePath ?? null, file);
+          setVendorImage(vendor.id, result.imagePath, result.publicUrl);
+          setSnackbar({ message: "Vendor image updated." });
+        }}
+        onImageDelete={vendor.imagePath ? async () => {
+          await deleteVendorImage(vendor.id, vendor.imagePath!);
+          setVendorImage(vendor.id, null);
+          setSnackbar({ message: "Vendor image deleted." });
+        } : undefined}
         onReportIssue={(message) =>
           requireAuth(() =>
             setIssues((current) => [
