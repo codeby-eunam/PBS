@@ -44,21 +44,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true;
 
-    void supabase.auth.getSession().then(async ({ data }) => {
-      if (data.session?.user.is_anonymous) {
-        await supabase.auth.signOut();
-        if (active) {
-          setSession(null);
-          setLoading(false);
+    void (async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        if (data.session?.user.is_anonymous) {
+          await supabase.auth.signOut();
+          if (active) setSession(null);
+          return;
         }
-        return;
+        if (active) setSession(data.session);
+      } catch {
+        if (active) setSession(null);
+      } finally {
+        if (active) setLoading(false);
       }
-
-      if (active) {
-        setSession(data.session);
-        setLoading(false);
-      }
-    });
+    })();
 
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession?.user.is_anonymous ? null : nextSession);
@@ -225,23 +226,17 @@ function AuthDialog({
         message?: string;
         status?: number;
       };
-      const duplicate =
-        authError.code === 'user_already_exists' ||
-        authError.code === '23505' ||
-        authError.message?.toLowerCase().includes('already registered') ||
-        authError.message?.toLowerCase().includes('duplicate');
-
       const rateLimited =
         authError.status === 429 ||
         authError.code === 'over_email_send_rate_limit' ||
         authError.message?.toLowerCase().includes('rate limit');
 
       setErrors({
-        form: duplicate
-          ? 'This user ID is already taken.'
-          : rateLimited
-            ? 'Too many sign-up attempts. Please wait before trying again.'
-            : authError.message || 'Authentication failed. Please try again.',
+        form: mode === 'signup'
+          ? rateLimited
+            ? 'Could not create the account right now. Please wait before trying again.'
+            : 'Could not create the account. Check your details or try another user ID.'
+          : authError.message || 'Authentication failed. Please try again.',
       });
     } finally {
       setSubmitting(false);

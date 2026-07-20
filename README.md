@@ -10,3 +10,7 @@ npm run dev
 ```
 
 Vendor data is loaded from the Supabase `public.vendors` table. Apply `supabase/vendors.sql` once to create the table, policies, and initial lineup data.
+
+Before production deployment, complete [SECURITY_DEPLOYMENT.md](SECURITY_DEPLOYMENT.md),
+including Edge Function secrets, database and Storage policies, response headers,
+and monitoring alerts.

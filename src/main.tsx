@@ -1,143 +1,1237 @@
-import React,{useEffect,useMemo,useRef,useState}from'react';
-import{createRoot}from'react-dom/client';
-import{ArrowDown,ArrowLeft,ArrowUp,Bookmark,Check,ChevronRight,Compass,Copy,Flag,Heart,ImagePlus,Link as LinkIcon,LogOut,Plus,RotateCcw,Search,Settings,Share2,Trophy,User,X}from'lucide-react';
-import{AuthProvider,useAuth}from'./auth/AuthProvider';
-import{VendorReviews}from'./components/VendorReviews';
-import{getVendorReviews}from'./lib/reviews';
-import{getVendorBatch,getVendorCount}from'./lib/vendors';
-import type{CommunityPhoto,LineStatus,Review,ReviewWithPhotos,UserList,Vendor,VendorType}from'./types';
-import'./styles.css';import'./refinements.css';
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { Bookmark, Compass, Heart, User } from "lucide-react";
+import { AuthProvider, useAuth } from "./auth/AuthProvider";
+import * as AppModals from "./components/AppModals";
+import { DiscoverScreen } from "./screens/DiscoverScreen";
+import { VendorDetailScreen } from "./screens/VendorDetailScreen";
+import { SwipeResultsScreen, SwipeScreen } from "./screens/SwipeScreen";
+import { TournamentScreen } from "./screens/TournamentScreen";
+import { ListScreen } from "./screens/ListScreen";
+import {
+  LikedScreen,
+  ListsScreen,
+  PicksScreen,
+  ProfileScreen,
+} from "./screens/DashboardScreens";
+import {
+  applyLineReport,
+  findRecentDeviceReport,
+  lineReportMessages,
+  type WaitReport,
+} from "./features/lineReports";
+import { useVendorCatalog } from "./hooks/useVendorCatalog";
+import { useVendorReviews } from "./hooks/useVendorReviews";
+import { useGameFlow } from "./hooks/useGameFlow";
+import { useRemoteLists } from "./hooks/useRemoteLists";
+import { readStorage, usePersistentState, writeStorage } from "./lib/storage";
+import {
+  cleanIssues,
+  cleanLists,
+  cleanReports,
+  cleanStringArray,
+} from "./lib/cacheNormalization";
+import type { UserList, Vendor } from "./types";
+import "./styles.css";
+import "./refinements.css";
 
-type Route={name:string;id?:string};
-type WaitReport={status:Exclude<LineStatus,null|'Very busy'>;at:number;photo:string|null};
-type SaveRequest={vendorIds:string[];sourceListId?:string;removeFromSource?:boolean;title:string};
-type SnackbarState={message:string;undo?:()=>void};
-type SwipeSession={ids:string[];at:number;liked:string[];savedAt:number};
-const starterLists=(vendors:Vendor[])=>({
- starter:{id:'seattle-picks',title:'My Seattle Picks',description:'My favorite food vendors at Bite of Seattle.',vendorIds:vendors.filter(v=>v.vendorType==='food').slice(0,8).map(v=>v.id),visibility:'private',fetches:0}as UserList,
- publicLists:[
-  {id:'spicy',title:'Seattle Flavor Tour',description:'Bold flavors from across the festival.',vendorIds:vendors.filter(v=>v.foodTypes.some(x=>['Korean Food','Tacos','Ramen'].includes(x))).slice(0,10).map(v=>v.id),visibility:'public',fetches:842},
-  {id:'desserts',title:'Dessert Walk',description:'A sweet route through the festival.',vendorIds:vendors.filter(v=>v.vendorType==='dessert').slice(0,10).map(v=>v.id),visibility:'public',fetches:516},
-  {id:'play',title:'Shop & Play',description:'Shopping and games worth checking out.',vendorIds:vendors.filter(v=>v.vendorType==='shopping'||v.vendorType==='game').slice(0,10).map(v=>v.id),visibility:'public',fetches:96},
- ]as UserList[],
+type Route = { name: string; id?: string };
+type SaveRequest = {
+  vendorIds: string[];
+  sourceListId?: string;
+  removeFromSource?: boolean;
+  title: string;
+};
+type SnackbarState = { message: string; undo?: () => void };
+const MAX_LOCAL_EVENTS = 200;
+const starterLists = (vendors: Vendor[]) => ({
+  starter: {
+    id: "seattle-picks",
+    title: "My Seattle Picks",
+    description: "My favorite food vendors at Bite of Seattle.",
+    vendorIds: vendors
+      .filter((v) => v.vendorType === "food")
+      .slice(0, 8)
+      .map((v) => v.id),
+    visibility: "private",
+    fetches: 0,
+  } as UserList,
+  publicLists: [
+    {
+      id: "spicy",
+      title: "Seattle Flavor Tour",
+      description: "Bold flavors from across the festival.",
+      vendorIds: vendors
+        .filter((v) =>
+          v.foodTypes.some((x) =>
+            ["Korean Food", "Tacos", "Ramen"].includes(x),
+          ),
+        )
+        .slice(0, 10)
+        .map((v) => v.id),
+      visibility: "public",
+      fetches: 0,
+    },
+    {
+      id: "desserts",
+      title: "Dessert Walk",
+      description: "A sweet route through the festival.",
+      vendorIds: vendors
+        .filter((v) => v.vendorType === "dessert")
+        .slice(0, 10)
+        .map((v) => v.id),
+      visibility: "public",
+      fetches: 0,
+    },
+    {
+      id: "play",
+      title: "Shop & Play",
+      description: "Shopping and games worth checking out.",
+      vendorIds: vendors
+        .filter((v) => v.vendorType === "shopping" || v.vendorType === "game")
+        .slice(0, 10)
+        .map((v) => v.id),
+      visibility: "public",
+      fetches: 0,
+    },
+  ] as UserList[],
 });
-const mergeVendors=(current:Vendor[],incoming:Vendor[])=>{const merged=new Map(current.map(v=>[v.name.trim().toLocaleLowerCase(),v]));for(const vendor of incoming){const key=vendor.name.trim().toLocaleLowerCase();const existing=merged.get(key);merged.set(key,existing?{...existing,cuisines:[...new Set([...existing.cuisines,...vendor.cuisines])],foodTypes:[...new Set([...existing.foodTypes,...vendor.foodTypes])],menuItems:[...new Set([...existing.menuItems,...vendor.menuItems])],dietaryTags:[...new Set([...existing.dietaryTags,...vendor.dietaryTags])],description:existing.description??vendor.description,reviewCount:Math.max(existing.reviewCount,vendor.reviewCount),reviewSnippets:[...new Set([...existing.reviewSnippets,...vendor.reviewSnippets])],lineStatus:existing.lineStatus??vendor.lineStatus,instagramUrl:existing.instagramUrl??vendor.instagramUrl}:vendor)}return[...merged.values()]};
-const cleanLists=(value:unknown):UserList[]=>Array.isArray(value)?value.map((l:UserList)=>({...l,description:typeof l.description==='string'?l.description:'',vendorIds:(l.vendorIds||[]).filter((id:unknown):id is string=>typeof id==='string')})):[];
-const read=<T,>(key:string,fallback:T):T=>{try{return JSON.parse(localStorage.getItem(key)||'null')??fallback}catch{return fallback}};
-const photoUploadsAreOpen=()=>{const now=new Date();return now.getMonth()===6&&now.getDate()>=24&&now.getDate()<=26};
-const routeFromHash=():Route=>{const hash=location.hash.slice(1);for(const name of ['vendor','list','shared','result'])if(hash.startsWith(name+'-'))return{name,id:hash.slice(name.length+1)};return{name:['discover','lists','picks','profile','liked','swipe','tournament'].includes(hash)?hash:'discover'}};
-const encodeSharedList=(list:UserList)=>btoa(encodeURIComponent(JSON.stringify({id:`shared-${list.id}`,title:list.title,description:list.description,vendorIds:list.vendorIds,visibility:list.visibility,fetches:list.fetches})));
-const decodeSharedList=(value?:string):UserList|null=>{try{const parsed=JSON.parse(decodeURIComponent(atob(value||'')));return parsed&&typeof parsed.title==='string'&&Array.isArray(parsed.vendorIds)?{id:String(parsed.id||'shared-list'),title:parsed.title,description:String(parsed.description||''),vendorIds:parsed.vendorIds.filter((id:unknown)=>typeof id==='string'),visibility:parsed.visibility==='public'?'public':'private',fetches:Number(parsed.fetches||0)}:null}catch{return null}};
+let fallbackDeviceId: string | undefined;
+const newDeviceId = () =>
+  crypto.randomUUID?.() ??
+  `device-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const getDeviceId = () => {
+  try {
+    const existing = localStorage.getItem("bos-device-id");
+    if (existing) return existing;
+    const id = newDeviceId();
+    localStorage.setItem("bos-device-id", id);
+    return id;
+  } catch {
+    return (fallbackDeviceId ??= newDeviceId());
+  }
+};
+const eventTimeParts = (now = new Date()) =>
+  Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Los_Angeles",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(now)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)]),
+  );
+const photoUploadsAreOpen = (now = new Date()) => {
+  const parts = eventTimeParts(now);
+  return (
+    parts.year === 2026 &&
+    parts.month === 7 &&
+    parts.day >= 24 &&
+    parts.day <= 26
+  );
+};
+const lineReportsAreOpen = (now = new Date()) => {
+  const parts = eventTimeParts(now);
+  return (
+    parts.year === 2026 &&
+    parts.month === 7 &&
+    parts.day >= 24 &&
+    parts.day <= 26 &&
+    parts.hour >= 11 &&
+    parts.hour < 20
+  );
+};
+const routeFromHash = (): Route => {
+  const hash = location.hash.slice(1);
+  for (const name of ["vendor", "list", "shared", "result"])
+    if (hash.startsWith(name + "-"))
+      return { name, id: hash.slice(name.length + 1) };
+  return {
+    name: [
+      "discover",
+      "lists",
+      "picks",
+      "profile",
+      "liked",
+      "swipe",
+      "tournament",
+    ].includes(hash)
+      ? hash
+      : "discover",
+  };
+};
+const encodeSharedList = (list: UserList) =>
+  btoa(
+    encodeURIComponent(
+      JSON.stringify({
+        id: `shared-${list.id}`,
+        title: list.title,
+        description: list.description,
+        vendorIds: list.vendorIds,
+        visibility: list.visibility,
+        fetches: list.fetches,
+        remoteId: list.remoteId,
+      }),
+    ),
+  );
+const decodeSharedList = (value?: string): UserList | null => {
+  try {
+    const parsed = JSON.parse(decodeURIComponent(atob(value || "")));
+    return parsed &&
+      typeof parsed.title === "string" &&
+      Array.isArray(parsed.vendorIds)
+      ? {
+          id: String(parsed.id || "shared-list"),
+          title: parsed.title,
+          description: String(parsed.description || ""),
+          vendorIds: parsed.vendorIds.filter(
+            (id: unknown) => typeof id === "string",
+          ),
+          visibility: parsed.visibility === "public" ? "public" : "private",
+          fetches: Number(parsed.fetches || 0),
+          ...(typeof parsed.remoteId === "string"
+            ? { remoteId: parsed.remoteId }
+            : {}),
+        }
+      : null;
+  } catch {
+    return null;
+  }
+};
 
-function App(){
- const{user,loading,requireAuth,signOut}=useAuth();
- const[route,setRoute]=useState<Route>(routeFromHash);const[q,setQ]=useState('');
- const[vendors,setVendors]=useState<Vendor[]>([]);const[vendorsLoading,setVendorsLoading]=useState(true);const[vendorsLoadingMore,setVendorsLoadingMore]=useState(false);const[vendorsError,setVendorsError]=useState(false);const[vendorTotal,setVendorTotal]=useState(0);const[vendorOffset,setVendorOffset]=useState(0);const[visibleVendorCount,setVisibleVendorCount]=useState(10);const vendorLoadMoreRef=useRef<HTMLDivElement|null>(null);
- const[publicLists,setPublicLists]=useState<UserList[]>(()=>read<UserList[]>('bos-public-lists',[]));
- const[lists,setListsState]=useState<UserList[]>(()=>cleanLists(read('bos-lists',[])));
- const setLists:React.Dispatch<React.SetStateAction<UserList[]>>=update=>{if(user)setListsState(update);else requireAuth(()=>setListsState(update))};
- const knownFetchedIds=useRef(new Set(lists.filter(l=>l.fetched).map(l=>l.id)));
- const[liked,setLiked]=useState<string[]>(()=>read<string[]>('bos-liked',[]));
- const[submitted,setSubmitted]=useState<Vendor[]>(()=>read<Vendor[]>('bos-submitted-v2',[]).filter(v=>v?.isActive&&v?.vendorType));
- const[reports,setReports]=useState<Record<string,WaitReport[]>>(()=>read('bos-line-history',{}));
- const[reviews,setReviews]=useState<ReviewWithPhotos[]>([]);const[reviewsLoading,setReviewsLoading]=useState(false);const[reviewLoadErrors,setReviewLoadErrors]=useState<Set<string>>(()=>new Set());const communityPhotos:CommunityPhoto[]=reviews.flatMap(review=>review.photos.map(photo=>({vendorId:review.vendor_id,reviewId:review.id,imageUrl:photo.public_url,createdAt:new Date(photo.created_at).getTime()})));const[issues,setIssues]=useState<{vendorId:string;message:string;at:number}[]>(()=>read('bos-issues',[]));const[played,setPlayed]=useState(()=>read('bos-played',0));
- const[modal,setModal]=useState<'add'|'create-list'|'add-to-list'|'share'|'survey'|'manual'|null>(null);const[shareLabel,setShareLabel]=useState('');const[shareHash,setShareHash]=useState('#discover');const[manualList,setManualList]=useState<UserList|null>(null);
- const[saveRequest,setSaveRequest]=useState<SaveRequest|null>(null);const[recentListIds,setRecentListIds]=useState<string[]>(()=>read('bos-recent-lists',[]));const[snackbar,setSnackbar]=useState<SnackbarState|null>(null);
- const[swipeIds,setSwipeIds]=useState<string[]>([]);const[swipeAt,setSwipeAt]=useState(0);const[swipeLiked,setSwipeLiked]=useState<string[]>([]);const[savedSwipe,setSavedSwipe]=useState<SwipeSession|null>(()=>read<SwipeSession|null>('bos-swipe-progress',null));const[tourney,setTourney]=useState<string[]>([]);const[tourneyStart,setTourneyStart]=useState<string[]>([]);const[tourneySource,setTourneySource]=useState({hash:'#picks',label:'Selected vendors'});const[tourneyPicks,setTourneyPicks]=useState(0);const[winner,setWinner]=useState<string>();
- const photoUploadsOpen=photoUploadsAreOpen();
- const allVendors=useMemo(()=>vendors.map(v=>({...v,instagramUrl:v.instagramUrl??null})),[vendors]);
- const vendorMap=useMemo(()=>new Map(allVendors.map(v=>[v.id,v])),[allVendors]);
- useEffect(()=>{let active=true;void getVendorCount().then(async total=>{const initialSize=Math.ceil(total/2);const batch=await getVendorBatch(0,initialSize);if(!active)return;setVendorTotal(total);setVendorOffset(batch.rawCount);setVendors(batch.vendors);setVendorsError(false)}).catch(()=>{if(active)setVendorsError(true)}).finally(()=>{if(active)setVendorsLoading(false)});return()=>{active=false}},[]);
- useEffect(()=>{if(!vendors.length)return;const defaults=starterLists(vendors);const validIds=new Set(vendors.map(v=>v.id));const fullyLoaded=vendorTotal>0&&vendorOffset>=vendorTotal;const defaultPublicIds=new Set(defaults.publicLists.map(list=>list.id));setListsState(current=>{if(!current.length)return[defaults.starter];return current.map(list=>list.id===defaults.starter.id?{...list,vendorIds:defaults.starter.vendorIds}:fullyLoaded?{...list,vendorIds:list.vendorIds.filter(id=>validIds.has(id))}:list)});setPublicLists(current=>[...defaults.publicLists,...current.filter(list=>!defaultPublicIds.has(list.id)).map(list=>fullyLoaded?{...list,vendorIds:list.vendorIds.filter(id=>validIds.has(id))}:list)]);if(fullyLoaded)setLiked(current=>current.filter(id=>validIds.has(id)))},[vendors,vendorOffset,vendorTotal]);
- const loadRemainingVendors=()=>{if(vendorsLoadingMore||vendorOffset>=vendorTotal)return;setVendorsLoadingMore(true);void getVendorBatch(vendorOffset,vendorTotal-vendorOffset).then(batch=>{setVendors(current=>mergeVendors(current,batch.vendors));setVendorOffset(current=>current+batch.rawCount);setVendorsError(false)}).catch(()=>setVendorsError(true)).finally(()=>setVendorsLoadingMore(false))};
- useEffect(()=>{const node=vendorLoadMoreRef.current;if(!node||route.name!=='discover')return;const observer=new IntersectionObserver(entries=>{if(!entries[0]?.isIntersecting)return;setVisibleVendorCount(current=>Math.min(current+10,Math.max(current,vendors.length)));if(visibleVendorCount+20>=vendors.length)loadRemainingVendors()},{rootMargin:'240px'});observer.observe(node);return()=>observer.disconnect()},[route.name,vendors.length,visibleVendorCount,vendorOffset,vendorTotal,vendorsLoadingMore]);
- useEffect(()=>{setVisibleVendorCount(10);if(q.trim()&&vendorOffset<vendorTotal)loadRemainingVendors()},[q]);
- const refreshVendorReviews=async(vendorId:string)=>{setReviewsLoading(true);try{const next=await getVendorReviews(vendorId);setReviews(current=>[...current.filter(review=>review.vendor_id!==vendorId),...next]);setReviewLoadErrors(current=>{const nextErrors=new Set(current);nextErrors.delete(vendorId);return nextErrors})}catch(error){setReviewLoadErrors(current=>new Set(current).add(vendorId));throw error}finally{setReviewsLoading(false)}};
- useEffect(()=>{const ids=route.name==='vendor'&&route.id?[route.id]:route.name==='swipe'&&swipeIds[swipeAt]?[swipeIds[swipeAt]]:route.name==='tournament'?tourney.slice(0,2):[];if(!ids.length)return;setReviewsLoading(true);void Promise.all(ids.map(getVendorReviews)).then(results=>{setReviews(current=>[...current.filter(review=>!ids.includes(review.vendor_id)),...results.flat()]);setReviewLoadErrors(current=>{const nextErrors=new Set(current);ids.forEach(id=>nextErrors.delete(id));return nextErrors})}).catch(()=>setReviewLoadErrors(current=>{const nextErrors=new Set(current);ids.forEach(id=>nextErrors.add(id));return nextErrors})).finally(()=>setReviewsLoading(false))},[route.name,route.id,swipeIds,swipeAt,tourney]);
- useEffect(()=>localStorage.setItem('bos-public-lists',JSON.stringify(publicLists)),[publicLists]);
- useEffect(()=>{const added=lists.filter(l=>l.fetched&&!knownFetchedIds.current.has(l.id));if(added.length){setPublicLists(current=>current.map(publicList=>({...publicList,fetches:publicList.fetches+added.filter(fetched=>fetched.id.startsWith(`fetched-${publicList.id}`)||fetched.title===`${publicList.title} Picks`).length})));added.forEach(l=>knownFetchedIds.current.add(l.id))}},[lists]);
- useEffect(()=>localStorage.setItem('bos-lists',JSON.stringify(lists)),[lists]);useEffect(()=>localStorage.setItem('bos-liked',JSON.stringify(liked)),[liked]);useEffect(()=>localStorage.setItem('bos-submitted-v2',JSON.stringify(submitted)),[submitted]);useEffect(()=>localStorage.setItem('bos-line-history',JSON.stringify(reports)),[reports]);useEffect(()=>localStorage.setItem('bos-issues',JSON.stringify(issues)),[issues]);useEffect(()=>localStorage.setItem('bos-played',JSON.stringify(played)),[played]);useEffect(()=>localStorage.setItem('bos-recent-lists',JSON.stringify(recentListIds)),[recentListIds]);useEffect(()=>{if(!snackbar)return;const timer=setTimeout(()=>setSnackbar(null),3500);return()=>clearTimeout(timer)},[snackbar]);useEffect(()=>{const syncRoute=()=>setRoute(routeFromHash());addEventListener('hashchange',syncRoute);return()=>removeEventListener('hashchange',syncRoute)},[]);
- const track=(event:string,detail='')=>{const events=read<{event:string;detail:string;at:number}[]>('bos-events',[]);localStorage.setItem('bos-events',JSON.stringify([...events,{event,detail,at:Date.now()}]))};
- const go=(name:string,id?:string)=>{if(!user&&['picks','profile','liked'].includes(name)){const target={name,id};requireAuth(()=>{location.hash=id?`${name}-${id}`:name;setRoute(target);scrollTo(0,0)});location.hash='discover';setRoute({name:'discover'});return}track(name==='vendor'?'vendor_view':'page_view',id||name);if(['discover','lists','picks','profile'].includes(name))setQ('');location.hash=id?`${name}-${id}`:name;setRoute({name,id});scrollTo(0,0)};
- useEffect(()=>{if(!loading&&!user&&['picks','profile','liked'].includes(route.name)){const target=route;requireAuth(()=>{location.hash=target.id?`${target.name}-${target.id}`:target.name;setRoute(target);scrollTo(0,0)});location.hash='discover';setRoute({name:'discover'})}},[loading,user,route.name,route.id,requireAuth]);
- const openSave=(vendorIds:string[],title='Save to List',sourceListId?:string,removeFromSource=false)=>requireAuth(()=>setSaveRequest({vendorIds,title,sourceListId,removeFromSource}));
- const commitSave=(listId:string,createdTitle?:string)=>{if(!saveRequest)return;const target=lists.find(l=>l.id===listId);const title=createdTitle||target?.title||'List';const existing=target?.vendorIds||[];const added=saveRequest.vendorIds.filter(id=>!existing.includes(id));if(!added.length){setSnackbar({message:'Already saved'});setSaveRequest(null);return}const previousLists=lists;const previousRecent=recentListIds;setLists(x=>x.map(l=>l.id===listId?{...l,vendorIds:[...new Set([...l.vendorIds,...saveRequest.vendorIds])]}:saveRequest.removeFromSource&&l.id===saveRequest.sourceListId?{...l,vendorIds:l.vendorIds.filter(id=>!saveRequest.vendorIds.includes(id))}:l));setRecentListIds(x=>[listId,...x.filter(id=>id!==listId)].slice(0,5));setSnackbar({message:`Saved to “${title}”`,undo:()=>{setLists(previousLists);setRecentListIds(previousRecent)}});track('save_vendor',saveRequest.vendorIds.join(','));setSaveRequest(null)};
- const createAndSave=(title:string)=>{if(!saveRequest)return;const id='list-'+Date.now();const previousLists=lists;const previousRecent=recentListIds;setLists(x=>[...x.map(l=>saveRequest.removeFromSource&&l.id===saveRequest.sourceListId?{...l,vendorIds:l.vendorIds.filter(vendorId=>!saveRequest.vendorIds.includes(vendorId))}:l),{id,title,description:'',vendorIds:saveRequest.vendorIds,visibility:'private',fetches:0}]);setRecentListIds(x=>[id,...x].slice(0,5));setSnackbar({message:`Saved to “${title}”`,undo:()=>{setLists(previousLists);setRecentListIds(previousRecent)}});track('save_vendor',saveRequest.vendorIds.join(','));setSaveRequest(null)};
- const createList=(input:{title:string;description:string;visibility:'public'|'private'})=>{const id='list-'+Date.now();setLists(x=>[...x,{id,...input,vendorIds:[],fetches:0}]);track('list_create',input.visibility);setModal(null);setSnackbar({message:`Created “${input.title}”`});go('list',id)};
- const startSwipe=(ids:string[])=>{const valid=ids.filter(id=>vendorMap.has(id));track('swipe_start',String(valid.length));setSwipeIds(valid);setSwipeLiked([]);setSwipeAt(0);go('swipe')};
- const resetSwipe=()=>{localStorage.removeItem('bos-swipe-progress');setSavedSwipe(null);startSwipe(swipeIds)};
- const saveSwipe=()=>{const session={ids:swipeIds,at:swipeAt,liked:swipeLiked,savedAt:Date.now()};localStorage.setItem('bos-swipe-progress',JSON.stringify(session));setSavedSwipe(session);track('swipe_save',String(swipeAt));setSnackbar({message:'Swipe progress saved'})};
- const resumeSwipe=()=>{if(!savedSwipe)return;const ids=savedSwipe.ids.filter(id=>vendorMap.has(id));setSwipeIds(ids);setSwipeAt(Math.min(savedSwipe.at,ids.length));setSwipeLiked(savedSwipe.liked.filter(id=>vendorMap.has(id)));track('swipe_resume',String(savedSwipe.at));go('swipe')};
- const startTournament=(ids:string[],label='Selected vendors')=>{const valid=[...new Set(ids.filter(id=>vendorMap.has(id)))];if(valid.length<2){setSnackbar({message:'Choose at least 2 vendors to start a tournament'});return}track('tournament_start',String(valid.length));setTourney(valid);setTourneyStart(valid);setTourneySource({hash:location.hash||'#picks',label});setTourneyPicks(0);setWinner(undefined);go('tournament')};
- const leaveTournament=()=>{location.hash=tourneySource.hash;setRoute(routeFromHash());scrollTo(0,0)};
- const openShare=(label:string,hash=location.hash||'#discover')=>{setShareLabel(label);setShareHash(hash);setModal('share')};
- const patchList=(id:string,patch:Partial<UserList>)=>setLists(x=>x.map(l=>l.id===id?{...l,...patch}:l));
- const withCurrentLine=(v:Vendor)=>{const latest=(reports[v.id]||[])[0];return{...v,lineStatus:latest&&Date.now()-latest.at<30*60*1000?latest.status:v.lineStatus}};
- const sharedList=route.name==='shared'?decodeSharedList(route.id):null;const currentList=sharedList||[...(user?lists:[]),...publicLists].find(x=>x.id===route.id);const vendor=route.id?vendorMap.get(route.id):undefined;
- useEffect(()=>{if(!loading&&!user&&route.name==='list'&&lists.some(list=>list.id===route.id)){const target=route;requireAuth(()=>{location.hash=`list-${target.id}`;setRoute(target);scrollTo(0,0)});location.hash='lists';setRoute({name:'lists'})}},[loading,user,route.name,route.id,lists,requireAuth]);
- let screen:React.ReactNode=null;
+function App() {
+  const { user, loading, requireAuth, signOut } = useAuth();
+  const [route, setRoute] = useState<Route>(routeFromHash);
+  const [q, setQ] = useState("");
+  const {
+    vendors,
+    vendorMap,
+    total: vendorTotal,
+    offset: vendorOffset,
+    loading: vendorsLoading,
+    loadingMore: vendorsLoadingMore,
+    error: vendorsError,
+    loadMore: loadRemainingVendors,
+  } = useVendorCatalog();
+  const [visibleVendorCount, setVisibleVendorCount] = useState(10);
+  const vendorLoadMoreRef = useRef<HTMLDivElement | null>(null);
+  const [publicLists, setPublicLists] = usePersistentState<UserList[]>(
+    "bos-public-lists",
+    [],
+    cleanLists,
+  );
+  const [lists, setListsState] = usePersistentState<UserList[]>(
+    "bos-lists",
+    [],
+    cleanLists,
+  );
+  const setLists: React.Dispatch<React.SetStateAction<UserList[]>> = (
+    update,
+  ) => {
+    if (user) setListsState(update);
+    else requireAuth(() => setListsState(update));
+  };
+  const knownFetchedIds = useRef(
+    new Set(lists.filter((l) => l.fetched).map((l) => l.id)),
+  );
+  const [liked, setLiked] = usePersistentState<string[]>(
+    "bos-liked",
+    [],
+    cleanStringArray,
+  );
+  const [submitted, setSubmitted] = usePersistentState<Vendor[]>(
+    "bos-submitted-v2",
+    [],
+    (value) =>
+      Array.isArray(value)
+        ? value.filter((v): v is Vendor =>
+            Boolean(
+              v &&
+              typeof v === "object" &&
+              (v as Vendor).isActive &&
+              (v as Vendor).vendorType,
+            ),
+          )
+        : [],
+  );
+  const [reports, setReports] = usePersistentState<
+    Record<string, WaitReport[]>
+  >("bos-line-history", {}, cleanReports);
+  const deviceId = useRef(getDeviceId()).current;
+  const {
+    reviews,
+    photos: communityPhotos,
+    loading: reviewsLoading,
+    errors: reviewLoadErrors,
+    load: loadReviews,
+    refresh: refreshVendorReviews,
+  } = useVendorReviews();
+  const [issues, setIssues] = usePersistentState<
+    { vendorId: string; message: string; at: number }[]
+  >("bos-issues", [], cleanIssues);
+  const [played, setPlayed] = usePersistentState("bos-played", 0, (value) =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0
+      ? value
+      : 0,
+  );
+  const [modal, setModal] = useState<
+    "add" | "create-list" | "add-to-list" | "share" | "survey" | "manual" | null
+  >(null);
+  const [shareLabel, setShareLabel] = useState("");
+  const [shareHash, setShareHash] = useState("#discover");
+  const [manualList, setManualList] = useState<UserList | null>(null);
+  const [saveRequest, setSaveRequest] = useState<SaveRequest | null>(null);
+  const [recentListIds, setRecentListIds] = usePersistentState<string[]>(
+    "bos-recent-lists",
+    [],
+    cleanStringArray,
+  );
+  const [snackbar, setSnackbar] = useState<SnackbarState | null>(null);
+  const notifyListSync = useCallback(
+    (message: string) => setSnackbar({ message }),
+    [],
+  );
+  const {
+    stats: listStats,
+    recordFetch,
+    removeRemote,
+    ensureSynced,
+  } = useRemoteLists({
+    userId: user?.id,
+    routeName: route.name,
+    lists,
+    setLists: setListsState,
+    notify: notifyListSync,
+  });
+  const {
+    swipeIds,
+    swipeAt,
+    swipeLiked,
+    savedSwipe,
+    setSwipeAt,
+    setSwipeLiked,
+    startSwipe,
+    resetSwipe,
+    saveSwipe,
+    resumeSwipe,
+    tourney,
+    tourneyStart,
+    tourneySource,
+    tourneyPicks,
+    winner,
+    setWinner,
+    startTournament,
+    setTourney,
+    setTourneyPicks,
+  } = useGameFlow({
+    vendorMap,
+    navigate: (name) => {
+      location.hash = name;
+      setRoute({ name });
+      scrollTo(0, 0);
+    },
+    track: (event, detail = "") => {
+      const events = readStorage<
+        { event: string; detail: string; at: number }[]
+      >("bos-events", []);
+      writeStorage(
+        "bos-events",
+        [...events, { event, detail, at: Date.now() }].slice(-MAX_LOCAL_EVENTS),
+      );
+    },
+    notify: (message) => setSnackbar({ message }),
+  });
+  const [eventClock, setEventClock] = useState(() => new Date());
+  const photoUploadsOpen = photoUploadsAreOpen(eventClock);
+  const lineReportsOpen = lineReportsAreOpen(eventClock);
+  const allVendors = vendors;
+  useEffect(() => {
+    const timer = window.setInterval(() => setEventClock(new Date()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    if (!vendors.length) return;
+    const defaults = starterLists(vendors);
+    const validIds = new Set(vendors.map((v) => v.id));
+    const fullyLoaded = vendorTotal > 0 && vendorOffset >= vendorTotal;
+    const defaultPublicIds = new Set(
+      defaults.publicLists.map((list) => list.id),
+    );
+    const defaultPublicTitles = new Set(
+      defaults.publicLists.map((list) => list.title.toLocaleLowerCase()),
+    );
+    setListsState((current) => {
+      const cleaned = current.filter(
+        (list) =>
+          !(
+            list.vendorIds.length === 0 &&
+            list.fetches === 0 &&
+            defaultPublicTitles.has(list.title.trim().toLocaleLowerCase())
+          ),
+      );
+      if (!cleaned.length) return [defaults.starter];
+      return cleaned.map((list) =>
+        list.id === defaults.starter.id
+          ? { ...list, vendorIds: defaults.starter.vendorIds }
+          : fullyLoaded
+            ? {
+                ...list,
+                vendorIds: list.vendorIds.filter((id) => validIds.has(id)),
+              }
+            : list,
+      );
+    });
+    setPublicLists((current) => [
+      ...defaults.publicLists,
+      ...current
+        .filter((list) => !defaultPublicIds.has(list.id))
+        .map((list) =>
+          fullyLoaded
+            ? {
+                ...list,
+                vendorIds: list.vendorIds.filter((id) => validIds.has(id)),
+              }
+            : list,
+        ),
+    ]);
+    if (fullyLoaded)
+      setLiked((current) => current.filter((id) => validIds.has(id)));
+  }, [vendors, vendorOffset, vendorTotal]);
+  useEffect(() => {
+    const node = vendorLoadMoreRef.current;
+    if (!node || route.name !== "discover") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        setVisibleVendorCount((current) =>
+          Math.min(current + 10, Math.max(current, vendors.length)),
+        );
+        if (visibleVendorCount + 20 >= vendors.length) loadRemainingVendors();
+      },
+      { rootMargin: "240px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [
+    route.name,
+    vendors.length,
+    visibleVendorCount,
+    vendorOffset,
+    vendorTotal,
+    vendorsLoadingMore,
+  ]);
+  useEffect(() => {
+    setVisibleVendorCount(10);
+  }, [q]);
+  useEffect(() => {
+    const ids =
+      route.name === "discover"
+        ? allVendors
+            .filter(
+              (vendor) =>
+                !q.trim() ||
+                [vendor.name, ...vendor.cuisines, ...vendor.foodTypes].some(
+                  (value) =>
+                    value
+                      .toLocaleLowerCase()
+                      .includes(q.trim().toLocaleLowerCase()),
+                ),
+            )
+            .slice(0, visibleVendorCount)
+            .map((vendor) => vendor.id)
+        : route.name === "vendor" && route.id
+          ? [route.id]
+          : route.name === "swipe" && swipeIds[swipeAt]
+            ? [swipeIds[swipeAt]]
+            : route.name === "tournament"
+              ? tourney.slice(0, 2)
+              : [];
+    void loadReviews(ids);
+  }, [
+    route.name,
+    route.id,
+    swipeIds,
+    swipeAt,
+    tourney,
+    loadReviews,
+    allVendors,
+    q,
+    visibleVendorCount,
+  ]);
+  useEffect(() => {
+    const added = lists.filter(
+      (l) => l.fetched && !knownFetchedIds.current.has(l.id),
+    );
+    if (added.length) {
+      setPublicLists((current) =>
+        current.map((publicList) => ({
+          ...publicList,
+          fetches:
+            publicList.fetches +
+            added.filter(
+              (fetched) =>
+                fetched.id.startsWith(`fetched-${publicList.id}`) ||
+                fetched.title === `${publicList.title} Picks`,
+            ).length,
+        })),
+      );
+      added.forEach((l) => knownFetchedIds.current.add(l.id));
+    }
+  }, [lists]);
+  useEffect(() => {
+    if (!snackbar) return;
+    const timer = setTimeout(() => setSnackbar(null), 3500);
+    return () => clearTimeout(timer);
+  }, [snackbar]);
+  useEffect(() => {
+    const syncRoute = () => setRoute(routeFromHash());
+    addEventListener("hashchange", syncRoute);
+    return () => removeEventListener("hashchange", syncRoute);
+  }, []);
+  const track = (event: string, detail = "") => {
+    const events = readStorage<{ event: string; detail: string; at: number }[]>(
+      "bos-events",
+      [],
+    );
+    writeStorage(
+      "bos-events",
+      [...events, { event, detail, at: Date.now() }].slice(-MAX_LOCAL_EVENTS),
+    );
+  };
+  const go = (name: string, id?: string) => {
+    if (!user && ["picks", "profile", "liked"].includes(name)) {
+      const target = { name, id };
+      requireAuth(() => {
+        location.hash = id ? `${name}-${id}` : name;
+        setRoute(target);
+        scrollTo(0, 0);
+      });
+      location.hash = "discover";
+      setRoute({ name: "discover" });
+      return;
+    }
+    track(name === "vendor" ? "vendor_view" : "page_view", id || name);
+    if (["discover", "lists", "picks", "profile"].includes(name)) setQ("");
+    location.hash = id ? `${name}-${id}` : name;
+    setRoute({ name, id });
+    scrollTo(0, 0);
+  };
+  useEffect(() => {
+    if (
+      !loading &&
+      !user &&
+      ["picks", "profile", "liked"].includes(route.name)
+    ) {
+      const target = route;
+      requireAuth(() => {
+        location.hash = target.id ? `${target.name}-${target.id}` : target.name;
+        setRoute(target);
+        scrollTo(0, 0);
+      });
+      location.hash = "discover";
+      setRoute({ name: "discover" });
+    }
+  }, [loading, user, route.name, route.id, requireAuth]);
+  const openSave = (
+    vendorIds: string[],
+    title = "Save to List",
+    sourceListId?: string,
+    removeFromSource = false,
+  ) =>
+    requireAuth(() =>
+      setSaveRequest({ vendorIds, title, sourceListId, removeFromSource }),
+    );
+  const commitSave = (listId: string, createdTitle?: string) => {
+    if (!saveRequest) return;
+    const target = lists.find((l) => l.id === listId);
+    const title = createdTitle || target?.title || "List";
+    const existing = target?.vendorIds || [];
+    const added = saveRequest.vendorIds.filter((id) => !existing.includes(id));
+    if (!added.length) {
+      setSnackbar({ message: "Already saved" });
+      setSaveRequest(null);
+      return;
+    }
+    const previousLists = lists;
+    const previousRecent = recentListIds;
+    setLists((x) =>
+      x.map((l) =>
+        l.id === listId
+          ? {
+              ...l,
+              vendorIds: [
+                ...new Set([...l.vendorIds, ...saveRequest.vendorIds]),
+              ],
+            }
+          : saveRequest.removeFromSource && l.id === saveRequest.sourceListId
+            ? {
+                ...l,
+                vendorIds: l.vendorIds.filter(
+                  (id) => !saveRequest.vendorIds.includes(id),
+                ),
+              }
+            : l,
+      ),
+    );
+    setRecentListIds((x) =>
+      [listId, ...x.filter((id) => id !== listId)].slice(0, 5),
+    );
+    setSnackbar({
+      message: `Saved to "${title}"`,
+      undo: () => {
+        setLists(previousLists);
+        setRecentListIds(previousRecent);
+      },
+    });
+    track("save_vendor", saveRequest.vendorIds.join(","));
+    setSaveRequest(null);
+  };
+  const createAndSave = (title: string) => {
+    if (!saveRequest) return;
+    const id = "list-" + Date.now();
+    const previousLists = lists;
+    const previousRecent = recentListIds;
+    setLists((x) => [
+      ...x.map((l) =>
+        saveRequest.removeFromSource && l.id === saveRequest.sourceListId
+          ? {
+              ...l,
+              vendorIds: l.vendorIds.filter(
+                (vendorId) => !saveRequest.vendorIds.includes(vendorId),
+              ),
+            }
+          : l,
+      ),
+      {
+        id,
+        remoteId: crypto.randomUUID(),
+        title,
+        description: "",
+        vendorIds: saveRequest.vendorIds,
+        visibility: "private",
+        fetches: 0,
+      },
+    ]);
+    setRecentListIds((x) => [id, ...x].slice(0, 5));
+    setSnackbar({
+      message: `Saved to "${title}"`,
+      undo: () => {
+        setLists(previousLists);
+        setRecentListIds(previousRecent);
+      },
+    });
+    track("save_vendor", saveRequest.vendorIds.join(","));
+    setSaveRequest(null);
+  };
+  const createList = (input: {
+    title: string;
+    description: string;
+    visibility: "public" | "private";
+  }) => {
+    const id = "list-" + Date.now();
+    setLists((x) => [
+      ...x,
+      {
+        id,
+        remoteId: crypto.randomUUID(),
+        ...input,
+        vendorIds: [],
+        fetches: 0,
+      },
+    ]);
+    track("list_create", input.visibility);
+    setModal(null);
+    setSnackbar({ message: `Created "${input.title}"` });
+    go("list", id);
+  };
+  const leaveTournament = () => {
+    location.hash = tourneySource.hash;
+    setRoute(routeFromHash());
+    scrollTo(0, 0);
+  };
+  const openShare = (label: string, hash = location.hash || "#discover") => {
+    setShareLabel(label);
+    setShareHash(hash);
+    setModal("share");
+  };
+  const patchList = (id: string, patch: Partial<UserList>) =>
+    setLists((x) => x.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  const withCurrentLine = (v: Vendor) => {
+    const latest = (reports[v.id] || [])[0];
+    return {
+      ...v,
+      lineStatus:
+        latest && Date.now() - latest.at < 30 * 60 * 1000
+          ? latest.status
+          : v.lineStatus,
+    };
+  };
+  const sharedList =
+    route.name === "shared" ? decodeSharedList(route.id) : null;
+  const currentList =
+    sharedList ||
+    [...(user ? lists : []), ...publicLists].find((x) => x.id === route.id);
+  const vendor = route.id ? vendorMap.get(route.id) : undefined;
+  useEffect(() => {
+    if (
+      !loading &&
+      !user &&
+      route.name === "list" &&
+      lists.some((list) => list.id === route.id)
+    ) {
+      const target = route;
+      requireAuth(() => {
+        location.hash = `list-${target.id}`;
+        setRoute(target);
+        scrollTo(0, 0);
+      });
+      location.hash = "lists";
+      setRoute({ name: "lists" });
+    }
+  }, [loading, user, route.name, route.id, lists, requireAuth]);
+  let screen: React.ReactNode = null;
 
- if(route.name==='discover'){
-  const query=q.trim().toLocaleLowerCase();
-  const truckResults=allVendors.filter(v=>!query||[v.name,...v.cuisines,...v.foodTypes].some(x=>x.toLocaleLowerCase().includes(query)));
-  const menuResults=query?allVendors.filter(v=>v.menuItems.some(x=>x.toLocaleLowerCase().includes(query))):[];
-  screen=<><Header title="Discover" sub="Find vendors and menus"/><SearchBox value={q} set={s=>{setQ(s);if(s)track('search',s)}}/><Section title="Vendors">{vendorsLoading?<p className="no-results">Loading vendors...</p>:vendorsError&&!vendors.length?<p className="no-results" role="alert">Vendors could not be loaded. Please try again.</p>:truckResults.length?truckResults.slice(0,visibleVendorCount).map(v=><VendorRow key={v.id} v={v} onClick={()=>go('vendor',v.id)} saved={Boolean(user)&&lists.some(l=>l.vendorIds.includes(v.id))} onSave={()=>openSave([v.id])}/>):<NoResults/>}</Section>{!vendorsLoading&&truckResults.length>visibleVendorCount&&<div ref={vendorLoadMoreRef} className="no-results">Scroll for more vendors</div>}{vendorsLoadingMore&&<p className="no-results">Loading more vendors...</p>}{query&&<Section title="Menus">{menuResults.length?menuResults.flatMap(v=>v.menuItems.filter(m=>m.toLocaleLowerCase().includes(query)).map(m=><MenuRow key={`${v.id}-${m}`} vendor={v} menu={m} onClick={()=>go('vendor',v.id)}/>)):<NoResults/>}</Section>}<button className="add-vendor" onClick={()=>requireAuth(()=>setModal('add'))}><Plus/> Add Vendor</button></>;
- }else if(route.name==='vendor'&&vendor){const history=reports[vendor.id]||[];screen=<VendorDetail v={withCurrentLine(vendor)} back={()=>go('discover')} saved={Boolean(user)&&lists.some(l=>l.vendorIds.includes(vendor.id))} save={()=>openSave([vendor.id])} history={history} reviews={reviews.filter(r=>r.vendor_id===vendor.id)} reviewsLoading={reviewsLoading} reviewsUnavailable={reviewLoadErrors.has(vendor.id)} refreshReviews={()=>refreshVendorReviews(vendor.id)} notify={message=>setSnackbar({message})} photos={communityPhotos.filter(p=>p.vendorId===vendor.id)} photoUploadsOpen={photoUploadsOpen} report={status=>requireAuth(()=>{setReports(x=>({...x,[vendor.id]:[{status,photo:null,at:Date.now()},...(x[vendor.id]||[])].slice(0,10)}));track('wait_report',status)})} reportIssue={message=>requireAuth(()=>{setIssues(x=>[{vendorId:vendor.id,message,at:Date.now()},...x]);track('vendor_issue',vendor.id)})}/>;
- }else if(route.name==='lists'){const visibleLists=user?[...publicLists,...lists.filter(l=>l.visibility==='public')]:publicLists;screen=<><Header title="Lists" sub="Curated from current Supabase vendors"/><SearchBox value={q} set={setQ}/><Section title="Public lists">{vendorsLoading?<p className="no-results">Loading lists...</p>:vendorsError?<p className="no-results" role="alert">Lists could not be loaded because vendor data is unavailable.</p>:visibleLists.filter(l=>l.title.toLocaleLowerCase().includes(q.toLocaleLowerCase())).map(l=><ListCard key={l.id} l={l} onClick={()=>go('list',l.id)}/>)}</Section></>}
-else if(route.name==='list'&&currentList){const isOwned=lists.some(l=>l.id===currentList.id);const items=currentList.vendorIds.map(id=>vendorMap.get(id)).filter(Boolean)as Vendor[];const move=(index:number,delta:number)=>{const ids=[...currentList.vendorIds];const target=index+delta;if(target<0||target>=ids.length)return;[ids[index],ids[target]]=[ids[target],ids[index]];patchList(currentList.id,{vendorIds:ids})};screen=<><Back onClick={()=>go(isOwned?'picks':'lists')}/><Header title={currentList.title} sub={`${items.length} vendors · ${currentList.fetches} fetches`}/>{currentList.description&&<p className="list-description">{currentList.description}</p>}{isOwned&&<ListEditor list={currentList} rename={title=>patchList(currentList.id,{title})} describe={description=>patchList(currentList.id,{description})} addVendors={()=>{setManualList(currentList);setModal('add-to-list')}} visibility={visibility=>patchList(currentList.id,{visibility})} pin={()=>patchList(currentList.id,{pinned:!currentList.pinned})} move={()=>openSave(currentList.vendorIds,'Move List',currentList.id,true)} copy={()=>openSave(currentList.vendorIds,'Copy List')} remove={()=>{setLists(x=>x.filter(l=>l.id!==currentList.id));setRecentListIds(x=>x.filter(id=>id!==currentList.id));go('picks')}}/>} {items.map((v,i)=>isOwned?<ManagedVendorRow key={v.id} v={v} onClick={()=>go('vendor',v.id)} remove={()=>patchList(currentList.id,{vendorIds:currentList.vendorIds.filter(id=>id!==v.id)})} up={()=>move(i,-1)} down={()=>move(i,1)}/>:<VendorRow key={v.id} v={v} onClick={()=>go('vendor',v.id)}/>)}<div className={`actions${isOwned?'':' fetch-actions'}`}>{isOwned?<><button className="primary" onClick={()=>startSwipe(items.map(v=>v.id))}><Heart/> Start Swipe</button><button onClick={()=>startTournament(items.map(v=>v.id))}><Trophy/> Start Tournament</button><button onClick={()=>{setLists(x=>[...x,{id:'tasting-'+Date.now(),title:`${currentList.title} Tasting List`,description:`Tasting list based on ${currentList.title}.`,vendorIds:items.map(v=>v.id),visibility:'private',fetches:0}]);track('tasting_list',currentList.id)}}><Plus/> Tasting List</button><button onClick={()=>openShare(currentList.title,`#shared-${encodeSharedList(currentList)}`)}><Share2/> Share</button></>:<><button className="primary" onClick={()=>{setLists(x=>[...x,{...currentList,id:'fetched-'+currentList.id,fetched:true,fetches:0}]);go('picks')}}><Bookmark/> Fetch All</button><button onClick={()=>{setManualList(currentList);setModal('manual')}}><Check/> Pick Manually</button></>}</div></>;
- }else if(route.name==='picks'){const history=read<{event:string;detail:string;at:number}[]>('bos-events',[]).filter(e=>['swipe_start','tournament_start','share'].includes(e.event)).slice(-5).reverse();screen=<><Header title="My Picks" sub="Everything you saved"/><div className="statline"><span>{lists.length}<small>Lists</small></span><span>{liked.length}<small>Likes</small></span><span>{played}<small>Played</small></span></div><Section title="My Lists">{lists.filter(l=>!l.fetched).map(l=><ListCard key={l.id} l={l} onClick={()=>go('list',l.id)}/>)}</Section><Section title="Fetched Lists">{lists.filter(l=>l.fetched).length?lists.filter(l=>l.fetched).map(l=><ListCard key={l.id} l={l} onClick={()=>go('list',l.id)}/>):<p className="no-results">No fetched lists yet.</p>}</Section><Section title="Liked Vendors"><ListCard l={{id:'liked',title:'Liked Vendors',description:'Vendors liked during swipe sessions.',vendorIds:liked,visibility:'private',fetches:0}} onClick={()=>go('liked')}/></Section><Section title="History">{history.length?history.map((h,i)=><div className="history-row" key={`${h.at}-${i}`}><b>{h.event.replace('_',' ')}</b><time>{timeAgo(h.at)}</time></div>):<p className="no-results">No recent activity.</p>}</Section><button className="wide" onClick={()=>setModal('create-list')}><Plus/> Create new list</button></>;
- }else if(route.name==='liked'){const items=liked.map(id=>vendorMap.get(id)).filter(Boolean)as Vendor[];screen=<><Back onClick={()=>go('picks')}/><Header title="Liked Vendors" sub={`${items.length} vendors · system list`}/>{items.map(v=><ManagedVendorRow key={v.id} v={v} onClick={()=>go('vendor',v.id)} remove={()=>setLiked(x=>x.filter(id=>id!==v.id))} up={()=>{}} down={()=>{}}/>)}<div className="actions"><button className="primary" onClick={()=>startSwipe(items.map(v=>v.id))}><Heart/> Start Swipe</button><button onClick={()=>startTournament(items.map(v=>v.id))}><Trophy/> Start Tournament</button><button onClick={()=>openSave(items.map(v=>v.id),'Move Vendors')}><Bookmark/> Move to List</button></div></>;
- }else if(route.name==='profile')screen=<><Header title="Profile"/><div className="profile"><div className="avatar">{String(user?.user_metadata.display_name||user?.user_metadata.user_id||'U').slice(0,1).toUpperCase()}</div><h2>{user?.user_metadata.display_name||'Bite user'}</h2><p>{user?.user_metadata.user_id?`@${user.user_metadata.user_id}`:'User ID unavailable'}</p></div><div className="statline"><span>{publicLists.reduce((a,b)=>a+b.fetches,0)}<small>Total fetches</small></span><span>{lists.length}<small>Lists created</small></span><span>{liked.length}<small>Swipe likes</small></span><span>{played}<small>Tournaments</small></span></div><Section title="Recent public lists">{publicLists.slice(0,2).map(l=><ListCard key={l.id} l={l} onClick={()=>go('list',l.id)}/>)}</Section><section className="settings-panel"><h3>Settings</h3><button><Settings/> Profile preferences</button><button onClick={()=>void signOut().then(()=>go('discover')).catch(()=>setSnackbar({message:'Could not log out. Please try again.'}))}><LogOut/> Log out</button></section><section className="admin-panel"><h3>Moderator queue</h3><p>{submitted.length} vendor submissions</p><p>{reviews.filter(r=>r.flagged).length} flagged reviews</p><p>{issues.length} incorrect-info reports</p><small>Local demo only · connect an authenticated backend for production moderation.</small></section></>;
- else if(route.name==='swipe'){const raw=vendorMap.get(swipeIds[swipeAt]);const v=raw?withCurrentLine(raw):undefined;const resultIds=swipeLiked.filter(id=>vendorMap.has(id));const swipeLike=()=>{setLiked(x=>x.includes(v!.id)?x:[...x,v!.id]);setSwipeLiked(x=>x.includes(v!.id)?x:[...x,v!.id]);setSnackbar({message:'❤️ Saved to Liked Vendors'});setSwipeAt(x=>x+1)};screen=v?<><Back onClick={()=>go('picks')}/><div className="progress">{swipeAt+1} / {swipeIds.length}</div><SwipeCard v={v} reviews={reviews.filter(r=>r.vendor_id===v.id)} photos={communityPhotos.filter(p=>p.vendorId===v.id)} eventOpen={photoUploadsOpen}/><div className="swipe-actions text-actions"><button aria-label="Skip vendor" onClick={()=>setSwipeAt(x=>x+1)}><X/> Skip</button><button aria-label="Interested in vendor" className="love" onClick={swipeLike}><Heart/> Interested</button></div><button className="save-progress" onClick={saveSwipe}><Bookmark/> Save Progress</button></>:<SwipeResult vendors={resultIds.map(id=>vendorMap.get(id)!) } move={()=>openSave(resultIds,'Move Vendors')} tournament={()=>startTournament(resultIds,'Swipe results')} share={()=>openShare('My Liked Vendors',`#shared-${encodeSharedList({id:'swipe-result',title:'My Liked Vendors',description:'Vendors liked during a swipe session.',vendorIds:resultIds,visibility:'private',fetches:0})}`)} reset={resetSwipe}/>;
- }else if(route.name==='tournament'){const rawA=vendorMap.get(tourney[0]),rawB=vendorMap.get(tourney[1]);const a=rawA?withCurrentLine(rawA):undefined,b=rawB?withCurrentLine(rawB):undefined;if(a&&b){const pick=(id:string)=>{setTourney([id,...tourney.slice(2)]);setTourneyPicks(x=>x+1)};screen=<><div className="tournament-nav"><Back onClick={leaveTournament}/><button className="exit-tournament" onClick={leaveTournament}><X/> Exit</button></div><div className="round"><b>Tournament · Choose one</b><span>From {tourneySource.label}</span><progress value={tourneyPicks} max={Math.max(1,tourneyStart.length-1)}/><small>{tourneyPicks} of {Math.max(1,tourneyStart.length-1)} comparisons complete</small></div><div className="versus"><Compare v={a} reviews={reviews.filter(r=>r.vendor_id===a.id)} onClick={()=>pick(a.id)}/><b>VS</b><Compare v={b} reviews={reviews.filter(r=>r.vendor_id===b.id)} onClick={()=>pick(b.id)}/></div></>}else{const id=tourney[0];screen=<Empty title="You picked!" body={vendorMap.get(id)?.name||'Your favorite'} action="View result" onClick={()=>{setWinner(id);setPlayed(x=>x+1);go('result',id)}}/>}}
- else if(route.name==='result'){const v=winner?vendorMap.get(winner):route.id?vendorMap.get(route.id):undefined;screen=<div className="result"><div className="trophy">🏆</div><p>Tournament Winner</p><h1>{v?.name}</h1><p>{v?.menuItems[0]}</p><button className="primary" onClick={()=>v&&openSave([v.id])}><Bookmark/> Save to List</button><button onClick={()=>openShare(v?.name||'My Bite pick',v?`#result-${v.id}`:'#picks')}><LinkIcon/> Share result</button><button onClick={()=>startTournament(tourneyStart,tourneySource.label)}><RotateCcw/> Restart Tournament</button><button onClick={leaveTournament}><ArrowLeft/> Back to previous step</button></div>}
- const playableList=route.name==='liked'?{ids:liked.filter(id=>vendorMap.has(id)),label:'Liked Vendors'}:(route.name==='list'&&currentList?{ids:currentList.vendorIds.filter(id=>vendorMap.has(id)),label:currentList.title}:null);
- const tab=['discover','lists','picks','profile'].includes(route.name)?route.name:'';
- if(savedSwipe&&route.name!=='swipe'&&savedSwipe.at<savedSwipe.ids.length)screen=<><button className="resume-swipe" onClick={resumeSwipe}><RotateCcw/> Resume Swipe <small>{savedSwipe.at} / {savedSwipe.ids.length}</small></button>{screen}</>;
- return <main><div className="brand">Bite of Seattle <span>July 24–26</span></div>{playableList&&<ListPlayActions ids={playableList.ids} label={playableList.label} swipe={startSwipe} tournament={startTournament}/>}<div className="screen">{screen}</div>{tab&&<Nav active={tab} go={go}/>} {saveRequest&&<ListPicker title={saveRequest.title} lists={lists} recentIds={recentListIds} close={()=>setSaveRequest(null)} select={commitSave} create={createAndSave} togglePin={id=>patchList(id,{pinned:!lists.find(l=>l.id===id)?.pinned})}/>} {snackbar&&<Snackbar state={snackbar} close={()=>setSnackbar(null)}/>} {modal==='create-list'&&<CreateList close={()=>setModal(null)} create={createList}/>} {modal==='add-to-list'&&manualList&&<VendorPicker vendors={allVendors.filter(v=>!manualList.vendorIds.includes(v.id))} close={()=>setModal(null)} add={ids=>{patchList(manualList.id,{vendorIds:[...manualList.vendorIds,...ids]});setModal(null);setSnackbar({message:`Added ${ids.length} vendor${ids.length===1?'':'s'}`})}}/>} {modal==='add'&&<AddVendor close={()=>setModal(null)} add={v=>{setSubmitted(x=>[...x,v]);track('vendor_submission',v.name);setModal(null);setSnackbar({message:'Vendor submitted for review'})}}/>}{modal==='share'&&<ShareModal label={shareLabel} hash={shareHash} close={()=>setModal(null)} shared={()=>{track('share',shareLabel);setModal('survey')}}/>}{modal==='survey'&&<Survey close={()=>setModal(null)} answer={yes=>{track('survey',yes?'yes':'no');setModal(null)}}/>}{modal==='manual'&&manualList&&<ManualFetch list={manualList} vendors={manualList.vendorIds.map(id=>vendorMap.get(id)).filter(Boolean)as Vendor[]} close={()=>setModal(null)} fetch={ids=>{setLists(x=>[...x,{...manualList,id:'manual-'+Date.now(),title:`${manualList.title} Picks`,vendorIds:ids,fetched:true,fetches:0}]);setModal(null);go('picks')}}/>}</main>;
+  if (route.name === "discover") {
+    screen = (
+      <DiscoverScreen
+        vendors={allVendors}
+        photos={communityPhotos}
+        loading={vendorsLoading}
+        loadingMore={vendorsLoadingMore}
+        error={vendorsError}
+        query={q}
+        visibleCount={visibleVendorCount}
+        loadMoreRef={vendorLoadMoreRef}
+        lists={lists}
+        signedIn={Boolean(user)}
+        onQueryChange={(value) => {
+          setQ(value);
+          if (value) track("search", value);
+        }}
+        onVendorOpen={(id) => go("vendor", id)}
+        onVendorSave={(id) => openSave([id])}
+        onAddVendor={() => requireAuth(() => setModal("add"))}
+      />
+    );
+  } else if (route.name === "vendor" && vendor) {
+    const history = reports[vendor.id] || [];
+    const ownRecent = findRecentDeviceReport(history, deviceId);
+    const reportLine = (status: WaitReport["status"]) => {
+      if (!lineReportsAreOpen()) {
+        setSnackbar({ message: "Line updates are currently closed." });
+        return;
+      }
+      const change = applyLineReport(history, deviceId, status);
+      if (change.result !== "duplicate")
+        setReports((current) => ({ ...current, [vendor.id]: change.history }));
+      setSnackbar({ message: lineReportMessages[change.result] });
+    };
+    screen = (
+      <VendorDetailScreen
+        vendor={withCurrentLine(vendor)}
+        onBack={() => go("discover")}
+        saved={
+          Boolean(user) &&
+          lists.some((list) => list.vendorIds.includes(vendor.id))
+        }
+        onSave={() => openSave([vendor.id])}
+        history={history}
+        deviceId={deviceId}
+        canUndoLineReport={Boolean(ownRecent)}
+        onUndoLineReport={() =>
+          setReports((current) => ({
+            ...current,
+            [vendor.id]: (current[vendor.id] || []).filter(
+              (item) => item !== ownRecent,
+            ),
+          }))
+        }
+        reviews={reviews.filter((review) => review.vendor_id === vendor.id)}
+        reviewsLoading={reviewsLoading}
+        reviewsUnavailable={reviewLoadErrors.has(vendor.id)}
+        onRefreshReviews={() => refreshVendorReviews(vendor.id)}
+        onNotify={(message) => setSnackbar({ message })}
+        photos={communityPhotos.filter((photo) => photo.vendorId === vendor.id)}
+        photoUploadsOpen={photoUploadsOpen}
+        lineReportsOpen={lineReportsOpen}
+        onLineReport={reportLine}
+        onReportIssue={(message) =>
+          requireAuth(() =>
+            setIssues((current) => [
+              { vendorId: vendor.id, message, at: Date.now() },
+              ...current,
+            ]),
+          )
+        }
+      />
+    );
+  } else if (route.name === "lists") {
+    const visible = user
+      ? [
+          ...publicLists,
+          ...lists.filter((list) => list.visibility === "public"),
+        ]
+      : publicLists;
+    screen = (
+      <ListsScreen
+        lists={visible}
+        query={q}
+        loading={vendorsLoading}
+        error={vendorsError}
+        onQuery={setQ}
+        onOpen={(id) => go("list", id)}
+      />
+    );
+  } else if (route.name === "list" && currentList) {
+    const owned = lists.some((list) => list.id === currentList.id);
+    const items = currentList.vendorIds
+      .map((id) => vendorMap.get(id))
+      .filter(Boolean) as Vendor[];
+    const moveVendor = (index: number, delta: number) => {
+      const ids = [...currentList.vendorIds];
+      const target = index + delta;
+      if (target < 0 || target >= ids.length) return;
+      [ids[index], ids[target]] = [ids[target], ids[index]];
+      patchList(currentList.id, { vendorIds: ids });
+    };
+    screen = (
+      <ListScreen
+        list={currentList}
+        vendors={items}
+        owned={owned}
+        onBack={() => go(owned ? "picks" : "lists")}
+        onVendorOpen={(id) => go("vendor", id)}
+        onRemoveVendor={(id) =>
+          patchList(currentList.id, {
+            vendorIds: currentList.vendorIds.filter((value) => value !== id),
+          })
+        }
+        onMoveVendor={moveVendor}
+        onPatch={(patch) => patchList(currentList.id, patch)}
+        onAddVendors={() => {
+          setManualList(currentList);
+          setModal("add-to-list");
+        }}
+        onDelete={() => {
+          void removeRemote(currentList).catch(() =>
+            setSnackbar({ message: "Could not delete the Supabase list." }),
+          );
+          setLists((current) =>
+            current.filter((list) => list.id !== currentList.id),
+          );
+          go("picks");
+        }}
+        onMoveList={() =>
+          openSave(currentList.vendorIds, "Move List", currentList.id, true)
+        }
+        onCopyList={() => openSave(currentList.vendorIds, "Copy List")}
+        onSwipe={() => startSwipe(items.map((item) => item.id))}
+        onTournament={() => startTournament(items.map((item) => item.id))}
+        onTastingList={() =>
+          setLists((current) => [
+            ...current,
+            {
+              ...currentList,
+              id: "tasting-" + Date.now(),
+              remoteId: crypto.randomUUID(),
+              title: currentList.title + " Tasting List",
+              visibility: "private",
+              fetches: 0,
+            },
+          ])
+        }
+        onShare={() => {
+          void ensureSynced(currentList)
+            .then(() =>
+              openShare(
+                currentList.title,
+                "#shared-" + encodeSharedList(currentList),
+              ),
+            )
+            .catch(() =>
+              setSnackbar({ message: "Could not prepare this list to share." }),
+            );
+        }}
+        onFetchAll={() => {
+          void recordFetch(currentList)
+            .then((fetchCount) => {
+              setPublicLists((current) =>
+                current.map((list) =>
+                  list.remoteId === currentList.remoteId
+                    ? { ...list, fetches: fetchCount }
+                    : list,
+                ),
+              );
+              setLists((current) => {
+                const fetchedId = "fetched-" + currentList.id;
+                if (current.some((list) => list.id === fetchedId))
+                  return current;
+                return [
+                  ...current,
+                  {
+                    ...currentList,
+                    id: fetchedId,
+                    fetched: true,
+                    fetches: 0,
+                  },
+                ];
+              });
+              go("picks");
+            })
+            .catch(() =>
+              setSnackbar({ message: "Could not fetch this list." }),
+            );
+        }}
+        onPickManually={() => {
+          setManualList(currentList);
+          setModal("manual");
+        }}
+      />
+    );
+  } else if (route.name === "picks") {
+    const history = readStorage<
+      { event: string; detail: string; at: number }[]
+    >("bos-events", [])
+      .slice(-5)
+      .reverse();
+    screen = (
+      <PicksScreen
+        lists={lists}
+        likedCount={liked.length}
+        played={played}
+        history={history}
+        onOpen={(id) => go("list", id)}
+        onLiked={() => go("liked")}
+        onCreate={() => setModal("create-list")}
+      />
+    );
+  } else if (route.name === "liked") {
+    const items = liked
+      .map((id) => vendorMap.get(id))
+      .filter(Boolean) as Vendor[];
+    screen = (
+      <LikedScreen
+        vendors={items}
+        onBack={() => go("picks")}
+        onOpen={(id) => go("vendor", id)}
+        onRemove={(id) =>
+          setLiked((current) => current.filter((value) => value !== id))
+        }
+        onSwipe={() => startSwipe(items.map((item) => item.id))}
+        onTournament={() => startTournament(items.map((item) => item.id))}
+        onMove={() =>
+          openSave(
+            items.map((item) => item.id),
+            "Move Vendors",
+          )
+        }
+      />
+    );
+  } else if (route.name === "profile") {
+    screen = (
+      <ProfileScreen
+        displayName={String(user?.user_metadata.display_name || "Bite user")}
+        userId={user?.user_metadata.user_id}
+        totalFetches={listStats.totalFetches}
+        listCount={listStats.listCount}
+        likeCount={liked.length}
+        played={played}
+        publicLists={publicLists}
+        submittedCount={submitted.length}
+        flaggedCount={reviews.filter((review) => review.flagged).length}
+        issueCount={issues.length}
+        onOpen={(id) => go("list", id)}
+        onLogout={() =>
+          void signOut()
+            .then(() => go("discover"))
+            .catch(() => setSnackbar({ message: "Could not log out." }))
+        }
+      />
+    );
+  } else if (route.name === "swipe") {
+    const raw = vendorMap.get(swipeIds[swipeAt]);
+    const current = raw ? withCurrentLine(raw) : undefined;
+    const resultIds = swipeLiked.filter((id) => vendorMap.has(id));
+    const like = () => {
+      if (!current) return;
+      setLiked((items) =>
+        items.includes(current.id) ? items : [...items, current.id],
+      );
+      setSwipeLiked((items) =>
+        items.includes(current.id) ? items : [...items, current.id],
+      );
+      setSwipeAt((index) => index + 1);
+    };
+    screen = current ? (
+      <SwipeScreen
+        vendor={current}
+        position={swipeAt + 1}
+        total={swipeIds.length}
+        reviews={reviews.filter((review) => review.vendor_id === current.id)}
+        photos={communityPhotos.filter(
+          (photo) => photo.vendorId === current.id,
+        )}
+        photosOpen={photoUploadsOpen}
+        onBack={() => go("picks")}
+        onSkip={() => setSwipeAt((index) => index + 1)}
+        onLike={like}
+        onSave={saveSwipe}
+      />
+    ) : (
+      <SwipeResultsScreen
+        vendors={resultIds.map((id) => vendorMap.get(id)!)}
+        onMove={() => openSave(resultIds, "Move Vendors")}
+        onTournament={() => startTournament(resultIds, "Swipe results")}
+        onShare={() => openShare("My Liked Vendors")}
+        onReset={resetSwipe}
+      />
+    );
+  } else if (route.name === "tournament") {
+    const leftRaw = vendorMap.get(tourney[0]);
+    const rightRaw = vendorMap.get(tourney[1]);
+    const left = leftRaw ? withCurrentLine(leftRaw) : undefined;
+    const right = rightRaw ? withCurrentLine(rightRaw) : undefined;
+    screen =
+      left && right ? (
+        <TournamentScreen
+          left={left}
+          right={right}
+          leftReviews={reviews.filter((review) => review.vendor_id === left.id)}
+          rightReviews={reviews.filter(
+            (review) => review.vendor_id === right.id,
+          )}
+          picks={tourneyPicks}
+          totalPicks={tourneyStart.length - 1}
+          source={tourneySource.label}
+          onPick={(id) => {
+            setTourney([id, ...tourney.slice(2)]);
+            setTourneyPicks((count) => count + 1);
+          }}
+          onExit={leaveTournament}
+        />
+      ) : (
+        <div className="empty">
+          <h1>You picked!</h1>
+          <p>{vendorMap.get(tourney[0])?.name || "Your favorite"}</p>
+          <button
+            onClick={() => {
+              setWinner(tourney[0]);
+              setPlayed((count) => count + 1);
+              go("result", tourney[0]);
+            }}
+          >
+            View result
+          </button>
+        </div>
+      );
+  } else if (route.name === "result") {
+    const result = winner
+      ? vendorMap.get(winner)
+      : route.id
+        ? vendorMap.get(route.id)
+        : undefined;
+    screen = (
+      <div className="result">
+        <p>Tournament Winner</p>
+        <h1>{result?.name}</h1>
+        <button onClick={() => result && openSave([result.id])}>
+          Save to List
+        </button>
+        <button
+          onClick={() => startTournament(tourneyStart, tourneySource.label)}
+        >
+          Restart Tournament
+        </button>
+        <button onClick={leaveTournament}>Back</button>
+      </div>
+    );
+  }
+  const playable =
+    route.name === "liked"
+      ? liked.filter((id) => vendorMap.has(id))
+      : route.name === "list" && currentList
+        ? currentList.vendorIds.filter((id) => vendorMap.has(id))
+        : [];
+  const tab = ["discover", "lists", "picks", "profile"].includes(route.name)
+    ? route.name
+    : "";
+  return (
+    <main>
+      <div className="brand">
+        Bite of Seattle <span>July 24–26</span>
+      </div>
+      {playable.length > 0 && (
+        <div className="list-play-actions">
+          <button onClick={() => startSwipe(playable)}>Start Swipe</button>
+          <button onClick={() => startTournament(playable)}>
+            Start Tournament
+          </button>
+        </div>
+      )}
+      {savedSwipe &&
+        route.name !== "swipe" &&
+        savedSwipe.at < savedSwipe.ids.length && (
+          <button className="resume-swipe" onClick={resumeSwipe}>
+            Resume Swipe
+          </button>
+        )}
+      <div className="screen">{screen}</div>
+      {tab && <Nav active={tab} go={go} />}{" "}
+      {saveRequest && (
+        <AppModals.ListPickerModal
+          title={saveRequest.title}
+          lists={lists}
+          recentIds={recentListIds}
+          close={() => setSaveRequest(null)}
+          select={commitSave}
+          create={createAndSave}
+          togglePin={(id) =>
+            patchList(id, {
+              pinned: !lists.find((list) => list.id === id)?.pinned,
+            })
+          }
+        />
+      )}{" "}
+      {snackbar && (
+        <Snackbar state={snackbar} close={() => setSnackbar(null)} />
+      )}{" "}
+      {modal === "create-list" && (
+        <AppModals.CreateListModal
+          close={() => setModal(null)}
+          create={createList}
+        />
+      )}{" "}
+      {modal === "add-to-list" && manualList && (
+        <AppModals.VendorPickerModal
+          vendors={allVendors.filter(
+            (item) => !manualList.vendorIds.includes(item.id),
+          )}
+          close={() => setModal(null)}
+          add={(ids) => {
+            patchList(manualList.id, {
+              vendorIds: [...manualList.vendorIds, ...ids],
+            });
+            setModal(null);
+          }}
+        />
+      )}{" "}
+      {modal === "add" && (
+        <AppModals.AddVendorModal
+          close={() => setModal(null)}
+          add={(item) => {
+            setSubmitted((current) => [...current, item]);
+            setModal(null);
+          }}
+        />
+      )}{" "}
+      {modal === "share" && (
+        <AppModals.ShareModalView
+          label={shareLabel}
+          hash={shareHash}
+          close={() => setModal(null)}
+          shared={() => setModal("survey")}
+        />
+      )}{" "}
+      {modal === "survey" && (
+        <AppModals.SurveyModal
+          close={() => setModal(null)}
+          answer={() => setModal(null)}
+        />
+      )}{" "}
+      {modal === "manual" && manualList && (
+        <AppModals.ManualFetchModal
+          list={manualList}
+          vendors={
+            manualList.vendorIds
+              .map((id) => vendorMap.get(id))
+              .filter(Boolean) as Vendor[]
+          }
+          close={() => setModal(null)}
+          fetch={(ids) => {
+            void recordFetch(manualList)
+              .then((fetchCount) => {
+                setPublicLists((current) =>
+                  current.map((list) =>
+                    list.remoteId === manualList.remoteId
+                      ? { ...list, fetches: fetchCount }
+                      : list,
+                  ),
+                );
+                setLists((current) => [
+                  ...current,
+                  {
+                    ...manualList,
+                    id: "manual-" + Date.now(),
+                    title: manualList.title + " Picks",
+                    vendorIds: ids,
+                    fetched: true,
+                    fetches: 0,
+                  },
+                ]);
+                setModal(null);
+                go("picks");
+              })
+              .catch(() =>
+                setSnackbar({ message: "Could not fetch this list." }),
+              );
+          }}
+        />
+      )}
+    </main>
+  );
 }
 
-function SearchBox({value,set}:{value:string;set:(s:string)=>void}){return <label className="search"><Search/><input value={value} onChange={e=>set(e.target.value)} placeholder="Search vendors, menus, cuisines, or food types"/></label>}
-function Header({title,sub}:{title:string;sub?:string}){return <header><h1>{title}</h1>{sub&&<p>{sub}</p>}</header>}
-function ListPlayActions({ids,label,swipe,tournament}:{ids:string[];label:string;swipe:(ids:string[])=>void;tournament:(ids:string[],label?:string)=>void}){return <div className="list-play-actions" aria-label="List play options"><button className="primary" disabled={!ids.length} onClick={()=>swipe(ids)}><Heart/> Start Swipe</button><button disabled={ids.length<2} onClick={()=>tournament(ids,label)}><Trophy/> Start Tournament</button></div>}
-function Section({title,children}:{title:string;children:React.ReactNode}){return <section className="content-section"><h3>{title}</h3><div className="section-content">{children}</div></section>}
-function Back({onClick}:{onClick:()=>void}){return <button className="back" onClick={onClick}><ArrowLeft/></button>}
-function NoResults(){return <p className="no-results">No matching results.</p>}
-function VendorRow({v,onClick,onSave,saved}:{v:Vendor;onClick:()=>void;onSave?:()=>void;saved?:boolean}){const summaryItems=(v.menuItems.length?v.menuItems:v.foodTypes).slice(0,2);const summary=summaryItems.join(' · ')||'Details coming soon';const summaryKeys=new Set(summaryItems.map(x=>x.toLocaleLowerCase()));const meta=[...v.cuisines,...v.foodTypes].filter((x,i,all)=>!summaryKeys.has(x.toLocaleLowerCase())&&all.findIndex(y=>y.toLocaleLowerCase()===x.toLocaleLowerCase())===i).slice(0,4);return <article className="vendor-row text-card" onClick={onClick}><div><b>{v.name}</b><p>{summary}</p>{meta.length>0&&<small className={'vendor-meta '+v.vendorType}>{meta.join(' · ')}</small>}</div>{onSave&&<button className={'save-button '+(saved?'saved':'')} aria-label={saved?`Manage lists for ${v.name}`:`Choose a list for ${v.name}`} onClick={e=>{e.stopPropagation();onSave()}}><Bookmark fill={saved?'currentColor':'none'}/></button>}</article>}
-function ManagedVendorRow({v,onClick,remove,up,down}:{v:Vendor;onClick:()=>void;remove:()=>void;up:()=>void;down:()=>void}){return <article className="vendor-row text-card managed-row"><div onClick={onClick}><b>{v.name}</b><p>{v.menuItems.slice(0,2).join(' · ')||v.foodTypes.join(' · ')}</p></div><div className="row-tools"><button aria-label="Move up" onClick={up}><ArrowUp/></button><button aria-label="Move down" onClick={down}><ArrowDown/></button><button aria-label="Remove vendor" onClick={remove}><X/></button></div></article>}
-function MenuRow({vendor,menu,onClick}:{vendor:Vendor;menu:string;onClick:()=>void}){return <article className="menu-row text-card" onClick={onClick}><div><b>{menu}</b><p>{vendor.name}</p><small>{vendor.cuisines.join(' · ')||vendor.foodTypes.join(' · ')}</small></div><ChevronRight/></article>}
-const lineLabel=(status:LineStatus)=>status==='Busy'||status==='Very busy'?'Long':status||'Not reported';
- const reviewLines=(_v:Vendor,reviews:Review[])=>reviews.map(review=>review.comment||review.reason).filter((line):line is string=>Boolean(line));
- const showReviewPreview=(_v:Vendor,reviews:Review[])=>reviews.length>=15;
-const safeExternalUrl=(value:string|null)=>{if(!value)return null;try{const url=new URL(value);const host=url.hostname.toLowerCase();return(url.protocol==='https:'||url.protocol==='http:')&&(host==='instagram.com'||host.endsWith('.instagram.com'))?url.href:null}catch{return null}};
-function InstagramGlyph(){return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>}
-function InstagramLink({url,label='View Food on Instagram',className=''}:{url:string|null;label?:string;className?:string}){const href=safeExternalUrl(url);return href?<a className={`instagram-link ${className}`} href={href} target="_blank" rel="noopener noreferrer"><InstagramGlyph/>{label}</a>:null}
-function CommunityGallery({photos}:{photos:CommunityPhoto[]}){return <div className="community-gallery">{photos.slice(0,4).map((photo,i)=><img key={`${photo.reviewId}-${i}`} src={photo.imageUrl} alt={`Community food photo ${i+1}`}/>)}</div>}
-function VendorFacts({v}:{v:Vendor}){return <div className="vendor-facts"><div><small>Cuisine</small><b>{v.cuisines.join(' · ')||'Not reported'}</b></div><div><small>Food type</small><b>{v.foodTypes.join(' · ')||v.vendorType}</b></div><div><small>Featured menu</small><b>{v.menuItems[0]||'Not reported'}</b></div></div>}
-function VendorDetail({v,back,save,saved,report,history=[],reviews=[],reviewsLoading,reviewsUnavailable,refreshReviews,notify,photos=[],photoUploadsOpen,reportIssue}:{v:Vendor;back:()=>void;save:()=>void;saved:boolean;report:(s:'No line'|'Short'|'Busy'|'Sold out')=>void;history?:WaitReport[];reviews?:ReviewWithPhotos[];reviewsLoading:boolean;reviewsUnavailable:boolean;refreshReviews:()=>Promise<void>;notify:(message:string)=>void;photos?:CommunityPhoto[];photoUploadsOpen:boolean;reportIssue?:(message:string)=>void}){
- const hasPhotos=photos.length>0;
- return <><Back onClick={back}/>{hasPhotos?<CommunityGallery photos={photos}/>:<InstagramLink url={v.instagramUrl} className="instagram-hero"/>}<Header title={v.name}/><VendorFacts v={v}/><div className="detail-actions"><button className="primary" onClick={save}><Bookmark fill={saved?'currentColor':'none'}/> {saved?'Manage lists':'Save to List'}</button><button onClick={()=>shareContent(v.name,`#vendor-${v.id}`)}><Share2/> Share</button></div><section className="detail-section"><h3>Menu</h3>{v.menuItems.length?<ul>{v.menuItems.map(m=><li key={m}>{m}</li>)}</ul>:<p className="empty-copy">Menu details have not been reported.</p>}</section>
- <section className="detail-section current-line"><h3>Current Line</h3><div className="current-line-label"><span className={'dot '+(v.lineStatus||'').replace(/ /g,'-').toLowerCase()}/><b>{lineLabel(v.lineStatus)}</b><small>{history[0]?`Reported ${timeAgo(history[0].at)}`:'No community report yet'}</small></div><div className="wait-buttons">{(['No line','Short','Busy','Sold out']as const).map(status=><button key={status} className={v.lineStatus===status?'active':''} aria-pressed={v.lineStatus===status} onClick={()=>report(status)}>{status==='Busy'?'Long':status==='Sold out'?'Sold Out':status}</button>)}</div>{history.length>0&&<div className="line-history"><b>Recent reports</b>{history.slice(0,5).map((h,i)=><div key={`${h.at}-${i}`}><span>{lineLabel(h.status)}</span><time>{new Date(h.at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}</time></div>)}</div>}</section>
- <VendorReviews vendor={v} reviews={reviews} loading={reviewsLoading} unavailable={reviewsUnavailable} refresh={refreshReviews} notify={notify}/>
- <section className="detail-section community-photos"><h3>Community Photos</h3>{hasPhotos?<p className="empty-copy">{photos.length} community {photos.length===1?'photo is':'photos are'} shown above.</p>:<div className="empty-copy"><p>No community photos yet.</p><p>Visitors can upload photos during the event.</p></div>}</section><div className="contribute-actions"><button disabled={!photoUploadsOpen}><ImagePlus/> Upload Photo</button></div>{!photoUploadsOpen&&<p className="event-note">Photo uploads open during Bite of Seattle, July 24–26.</p>}{hasPhotos&&<InstagramLink url={v.instagramUrl} label="View on Instagram" className="instagram-footer"/>}<div className="source-box"><b>Vendor data source</b><p>{v.source}</p>{reportIssue&&<button onClick={()=>{const message=prompt('What information is incorrect?');if(message)reportIssue(message)}}><Flag/> Report incorrect info</button>}</div></>;
+function Nav({ active, go }: { active: string; go: (x: string) => void }) {
+  return (
+    <nav>
+      {[
+        ["discover", Compass, "Discover"],
+        ["lists", Bookmark, "Lists"],
+        ["picks", Heart, "My Picks"],
+        ["profile", User, "Profile"],
+      ].map(([id, I, label]: any) => (
+        <button
+          key={id}
+          className={active === id ? "active" : ""}
+          onClick={() => go(id)}
+        >
+          <I />
+          <span>{label}</span>
+        </button>
+      ))}
+    </nav>
+  );
 }
-function RollingReview({lines}:{lines:string[]}){const[index,setIndex]=useState(0);useEffect(()=>{if(lines.length<2)return;const timer=setInterval(()=>setIndex(x=>(x+1)%lines.length),3200);return()=>clearInterval(timer)},[lines.length]);return lines.length?<blockquote className="rolling-review">“{lines[index%lines.length]}”</blockquote>:null}
-function SwipeCard({v,reviews,photos=[],eventOpen=false}:{v:Vendor;reviews:Review[];photos?:CommunityPhoto[];eventOpen?:boolean}){const lines=reviewLines(v,reviews);const photo=eventOpen?photos[0]:undefined;return <article className="swipe-text-card">{photo&&<img className="swipe-community-photo" src={photo.imageUrl} alt={`${v.name} community food photo`}/>}<Header title={v.name}/><VendorFacts v={v}/><div className="swipe-line"><small>Current line</small><b>{lineLabel(v.lineStatus)}</b></div>{showReviewPreview(v,reviews)&&<RollingReview lines={lines}/>} {!photo&&<InstagramLink url={v.instagramUrl} label="View on Instagram"/>}</article>}
-function ListCard({l,onClick}:{l:UserList;onClick:()=>void}){return <article className="list-card text-card" onClick={onClick}><div><b>{l.title}</b>{l.description&&<p>{l.description}</p>}<small>{l.vendorIds.length} vendors · {l.fetches} fetches · {l.visibility}{l.fetched?' · fetched':''}</small></div><ChevronRight/></article>}
-function ListEditor({list,rename,describe,addVendors,visibility,pin,move,copy,remove}:{list:UserList;rename:(s:string)=>void;describe:(s:string)=>void;addVendors:()=>void;visibility:(v:'public'|'private')=>void;pin:()=>void;move:()=>void;copy:()=>void;remove:()=>void}){const[editing,setEditing]=useState<'title'|'description'|null>(null);const[title,setTitle]=useState(list.title);const[description,setDescription]=useState(list.description);return <div className="list-editor">{editing==='title'?<form onSubmit={e=>{e.preventDefault();if(title.trim()){rename(title.trim());setEditing(null)}}}><input aria-label="List title" value={title} onChange={e=>setTitle(e.target.value)}/><button>Save title</button></form>:<button onClick={()=>setEditing('title')}>Edit title</button>}{editing==='description'?<form className="description-editor" onSubmit={e=>{e.preventDefault();describe(description.trim());setEditing(null)}}><textarea aria-label="List description" value={description} onChange={e=>setDescription(e.target.value)}/><button>Save description</button></form>:<button onClick={()=>setEditing('description')}>Edit description</button>}<button onClick={addVendors}><Plus/> Add vendors</button><button onClick={()=>visibility(list.visibility==='public'?'private':'public')}>{list.visibility==='public'?'Make private':'Make public'}</button><button onClick={pin}>{list.pinned?'★ Unpin':'☆ Pin'}</button><button onClick={move}>Move</button><button onClick={copy}><Copy/> Copy</button><button className="danger" onClick={remove}>Delete</button></div>}
-function Compare({v,reviews,onClick}:{v:Vendor;reviews:Review[];onClick:()=>void}){const lines=reviewLines(v,reviews);const price=reviews.find(r=>r.price?.trim())?.price||'Price not reported';return <article className="compare"><h2>{v.name}</h2><div className="compare-facts"><small>Featured menu</small><b>{v.menuItems[0]||'Not reported'}</b><small>Cuisine</small><span>{v.cuisines.join(' · ')||'Not reported'}</span><small>Food type</small><span>{v.foodTypes.join(' · ')||v.vendorType}</span><small>Price</small><span>{price}</span><small>Current line</small><span>{lineLabel(v.lineStatus)}</span>{reviews.length>=15&&<><small>Review summary</small><span>{lines[0]||'No review summary yet'}</span></>}</div><InstagramLink url={v.instagramUrl} label="View on Instagram"/><button className="primary choose-vendor" onClick={onClick}>Choose {v.name}</button></article>}
-function Empty({title,body,action,onClick}:{title:string;body:string;action:string;onClick:()=>void}){return <div className="empty"><div>OK</div><h1>{title}</h1><p>{body}</p><button className="primary" onClick={onClick}>{action}</button></div>}
-function Nav({active,go}:{active:string;go:(x:string)=>void}){return <nav>{[['discover',Compass,'Discover'],['lists',Bookmark,'Lists'],['picks',Heart,'My Picks'],['profile',User,'Profile']].map(([id,I,label]:any)=><button key={id} className={active===id?'active':''} onClick={()=>go(id)}><I/><span>{label}</span></button>)}</nav>}
-function Modal({children,close}:{children:React.ReactNode;close:()=>void}){return <div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&close()}><div className="modal-card"><button className="modal-close" onClick={close}><X/></button>{children}</div></div>}
-function ListPicker({title,lists,recentIds,close,select,create,togglePin}:{title:string;lists:UserList[];recentIds:string[];close:()=>void;select:(id:string)=>void;create:(title:string)=>void;togglePin:(id:string)=>void}){const[query,setQuery]=useState('');const[creating,setCreating]=useState(false);const[newTitle,setNewTitle]=useState('');const normalizedQuery=query.trim().toLowerCase();const matches=lists.filter(l=>l.title.toLowerCase().includes(normalizedQuery));const recent=recentIds.slice(0,5).map(id=>lists.find(l=>l.id===id)).filter((l):l is UserList=>Boolean(l));const recentIdSet=new Set(recent.map(l=>l.id));const pinned=lists.filter(l=>l.pinned&&!recentIdSet.has(l.id));const excluded=new Set([...recent,...pinned].map(l=>l.id));const others=lists.filter(l=>!excluded.has(l.id));const group=(label:string,items:UserList[])=>items.length?<section className="picker-group"><h3>{label}</h3>{items.map(l=><div className="picker-row" key={l.id}><button className="picker-select" onClick={()=>select(l.id)}><span>{l.pinned?'📌':'❤️'}</span>{l.title}</button><button className="pin-button" aria-label={`${l.pinned?'Unpin':'Pin'} ${l.title}`} onClick={()=>togglePin(l.id)}>{l.pinned?'★':'☆'}</button></div>)}</section>:null;return <div className="sheet-backdrop" onMouseDown={e=>e.target===e.currentTarget&&close()}><div className="list-picker" role="dialog" aria-modal="true" aria-labelledby="list-picker-title"><div className="sheet-handle"/><div className="sheet-header"><h2 id="list-picker-title">{title}</h2><button aria-label="Close list picker" onClick={close}><X/></button></div>{!normalizedQuery&&<>{group('⭐ Recently Used',recent)}{group('📌 Pinned Lists',pinned)}{group('All Lists',others)}</>}<label className="picker-search"><Search/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search Lists..."/></label>{normalizedQuery&&group('Search Results',matches)}{normalizedQuery&&!matches.length&&<p className="no-results">No matching lists.</p>}{creating?<form className="create-inline" onSubmit={e=>{e.preventDefault();if(newTitle.trim())create(newTitle.trim())}}><input autoFocus value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="List name"/><button className="primary">Create & Save</button></form>:<button className="create-list" onClick={()=>setCreating(true)}><Plus/> Create New List</button>}</div></div>}
-function Snackbar({state,close}:{state:SnackbarState;close:()=>void}){return <div className="snackbar" role="status" aria-live="polite"><span>{state.message}</span>{state.undo&&<button onClick={()=>{state.undo?.();close()}}>Undo</button>}</div>}
-function SwipeResult({vendors,move,tournament,share,reset}:{vendors:Vendor[];move:()=>void;tournament:()=>void;share:()=>void;reset:()=>void}){return <div className="swipe-result"><Header title="Result" sub={`Liked Vendors (${vendors.length})`}/><div className="result-vendors">{vendors.length?vendors.map(v=><div key={v.id}><b>{v.name}</b><small>{v.menuItems[0]||v.foodTypes[0]}</small></div>):<p>No vendors liked this round.</p>}</div><div className="result-actions"><button className="primary" disabled={!vendors.length} onClick={move}><Bookmark/> Move to List</button><button disabled={vendors.length<2} onClick={tournament}><Trophy/> Start Tournament</button><button onClick={share}><Share2/> Share</button><button onClick={reset}><RotateCcw/> Reset Swipe</button></div></div>}
-function AddVendor({close,add}:{close:()=>void;add:(v:Vendor)=>void}){const[name,setName]=useState('');const[menu,setMenu]=useState('');const[vendorType,setVendorType]=useState<VendorType>('food');const[cuisines,setCuisines]=useState('');const[foodTypes,setFoodTypes]=useState('');const[instagramUrl,setInstagramUrl]=useState('');const[nameError,setNameError]=useState('');const submit=(e:React.FormEvent)=>{e.preventDefault();if(!name.trim()){setNameError('Enter a vendor name.');return}setNameError('');add({id:'submitted-'+Date.now(),name:name.trim(),vendorType,cuisines:cuisines.split(',').map(x=>x.trim()).filter(Boolean),foodTypes:foodTypes.split(',').map(x=>x.trim()).filter(Boolean),menuItems:menu.split(',').map(x=>x.trim()).filter(Boolean),dietaryTags:[],description:null,reviewCount:0,reviewSnippets:[],lineStatus:null,instagramUrl:instagramUrl.trim()||null,source:'User submission',isActive:true})};return <Modal close={close}><h2>Add a vendor</h2><p className="modal-copy">Submissions are saved for review on this device.</p><form noValidate onSubmit={submit}><label>Vendor name<input autoFocus required aria-invalid={Boolean(nameError)} aria-describedby={nameError?'vendor-name-error':undefined} className={nameError?'invalid':''} value={name} onChange={e=>{setName(e.target.value);if(e.target.value.trim())setNameError('')}}/>{nameError&&<span id="vendor-name-error" className="field-error" role="alert">{nameError}</span>}</label><label>Menu items<input value={menu} onChange={e=>setMenu(e.target.value)} placeholder="Separate items with commas"/></label><label>Vendor type<select value={vendorType} onChange={e=>setVendorType(e.target.value as VendorType)}>{['food','drink','dessert','shopping','game'].map(x=><option key={x}>{x}</option>)}</select></label><label>Cuisines<input value={cuisines} onChange={e=>setCuisines(e.target.value)} placeholder="e.g. Korean, Asian"/></label><label>Food types<input value={foodTypes} onChange={e=>setFoodTypes(e.target.value)} placeholder="e.g. BBQ, Burgers"/></label><label>Instagram URL<input type="url" value={instagramUrl} onChange={e=>setInstagramUrl(e.target.value)} placeholder="https://www.instagram.com/vendor"/></label><button className="primary modal-action" type="submit">Submit vendor</button></form></Modal>}
-function ManualFetch({list,vendors,close,fetch}:{list:UserList;vendors:Vendor[];close:()=>void;fetch:(ids:string[])=>void}){const[selected,setSelected]=useState<string[]>([]);const allSelected=vendors.length>0&&selected.length===vendors.length;const toggle=(id:string)=>setSelected(x=>x.includes(id)?x.filter(value=>value!==id):[...x,id]);return <Modal close={close}><div className="manual-heading"><span className="manual-heading-icon"><Check/></span><div><h2>Pick manually</h2><p className="modal-copy">Choose the vendors you want from <b>{list.title}</b>.</p></div></div><div className="manual-toolbar"><span><b>{selected.length}</b> of {vendors.length} selected</span><button type="button" onClick={()=>setSelected(allSelected?[]:vendors.map(v=>v.id))}>{allSelected?'Clear all':'Select all'}</button></div><div className="manual-list manual-pick-list">{vendors.map(v=>{const checked=selected.includes(v.id);const detail=v.menuItems[0]||v.foodTypes[0]||v.cuisines[0]||v.vendorType;return <label className={checked?'selected':''} key={v.id}><input type="checkbox" checked={checked} onChange={()=>toggle(v.id)}/><span className="manual-check" aria-hidden="true">{checked&&<Check/>}</span><span className="manual-vendor"><b>{v.name}</b><small>{detail}</small></span></label>})}</div><div className="manual-footer"><button className="primary modal-action" disabled={!selected.length} onClick={()=>fetch(selected)}>{selected.length?<><Check/> Fetch {selected.length} vendor{selected.length===1?'':'s'}</>:'Select vendors to continue'}</button></div></Modal>}
-function ShareModal({label,hash,close,shared}:{label:string;hash:string;close:()=>void;shared:()=>void}){const share=async()=>{await shareContent(label,hash);shared()};return <Modal close={close}><h2>Share your picks</h2><p className="modal-copy">Invite friends to explore “{label}”.</p><button className="primary modal-action" onClick={share}><Share2/> Share or copy link</button></Modal>}
-function Survey({close,answer}:{close:()=>void;answer:(yes:boolean)=>void}){return <Modal close={close}><h2>Would you use this again?</h2><p className="modal-copy">One tap helps us improve the festival pilot.</p><div className="survey-actions"><button onClick={()=>answer(false)}>Not yet</button><button className="primary" onClick={()=>answer(true)}>Yes</button></div></Modal>}
-const timeAgo=(at:number)=>{const mins=Math.max(0,Math.floor((Date.now()-at)/60000));return mins<1?'just now':`${mins}m ago`};
-const shareContent=async(title:string,hash:string)=>{const url=`${location.origin}${location.pathname}${hash}`;const data={title,text:`Check out ${title} at Bite of Seattle`,url};if(navigator.share)await navigator.share(data);else await navigator.clipboard.writeText(url)};
-function CreateList({close,create}:{close:()=>void;create:(input:{title:string;description:string;visibility:'public'|'private'})=>void}){const[title,setTitle]=useState('');const[description,setDescription]=useState('');const[visibility,setVisibility]=useState<'public'|'private'>('private');const[error,setError]=useState('');return <Modal close={close}><h2>Create a list</h2><p className="modal-copy">Organize vendors into a new public or private list.</p><form noValidate onSubmit={e=>{e.preventDefault();if(!title.trim()){setError('Enter a list title.');return}create({title:title.trim(),description:description.trim(),visibility})}}><label>Title<input autoFocus required value={title} aria-invalid={Boolean(error)} className={error?'invalid':''} onChange={e=>{setTitle(e.target.value);if(e.target.value.trim())setError('')}} placeholder="e.g. Friday dinner picks"/>{error&&<span className="field-error" role="alert">{error}</span>}</label><label>Description<textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="What is this list for?"/></label><fieldset className="visibility-options"><legend>Visibility</legend><label><input type="radio" name="visibility" checked={visibility==='public'} onChange={()=>setVisibility('public')}/><span><b>Public</b><small>Anyone can discover this list.</small></span></label><label><input type="radio" name="visibility" checked={visibility==='private'} onChange={()=>setVisibility('private')}/><span><b>Private</b><small>Only you can access this list.</small></span></label></fieldset><button className="primary modal-action" type="submit">Create list</button></form></Modal>}
-function VendorPicker({vendors,close,add}:{vendors:Vendor[];close:()=>void;add:(ids:string[])=>void}){const[selected,setSelected]=useState<string[]>([]);const[query,setQuery]=useState('');const matches=vendors.filter(v=>v.name.toLowerCase().includes(query.trim().toLowerCase()));return <Modal close={close}><h2>Add vendors</h2><p className="modal-copy">Select one or more vendors to append to this list.</p><label>Search vendors<input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Vendor name"/></label><div className="manual-list">{matches.length?matches.map(v=><label key={v.id}><input type="checkbox" checked={selected.includes(v.id)} onChange={()=>setSelected(x=>x.includes(v.id)?x.filter(id=>id!==v.id):[...x,v.id])}/><span>{v.name}</span></label>):<p className="no-results">No vendors available.</p>}</div><button className="primary modal-action" disabled={!selected.length} onClick={()=>add(selected)}>Add {selected.length||''} vendor{selected.length===1?'':'s'}</button></Modal>}
-createRoot(document.getElementById('root')!).render(<AuthProvider><App/></AuthProvider>);
+function Snackbar({
+  state,
+  close,
+}: {
+  state: SnackbarState;
+  close: () => void;
+}) {
+  return (
+    <div className="snackbar" role="status" aria-live="polite">
+      <span>{state.message}</span>
+      {state.undo && (
+        <button
+          onClick={() => {
+            state.undo?.();
+            close();
+          }}
+        >
+          Undo
+        </button>
+      )}
+    </div>
+  );
+}
+createRoot(document.getElementById("root")!).render(
+  <AuthProvider>
+    <App />
+  </AuthProvider>,
+);
