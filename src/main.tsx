@@ -1063,7 +1063,7 @@ function App() {
   return (
     <main>
       <div className="brand">
-        Bite of Seattle <span>July 24–26</span>
+        The Bite <span>July 24–26</span>
       </div>
       {playable.length > 0 && (
         <div className="list-play-actions">
