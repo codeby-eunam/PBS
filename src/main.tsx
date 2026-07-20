@@ -50,10 +50,7 @@ const starterLists = (vendors: Vendor[]) => ({
     id: "seattle-picks",
     title: "My Seattle Picks",
     description: "My favorite food vendors at Bite of Seattle.",
-    vendorIds: vendors
-      .filter((v) => v.vendorType === "food")
-      .slice(0, 8)
-      .map((v) => v.id),
+    vendorIds: [],
     visibility: "private",
     fetches: 0,
   } as UserList,
@@ -378,14 +375,12 @@ function App() {
       );
       if (!cleaned.length) return [defaults.starter];
       return cleaned.map((list) =>
-        list.id === defaults.starter.id
-          ? { ...list, vendorIds: defaults.starter.vendorIds }
-          : fullyLoaded
-            ? {
-                ...list,
-                vendorIds: list.vendorIds.filter((id) => validIds.has(id)),
-              }
-            : list,
+        fullyLoaded
+          ? {
+              ...list,
+              vendorIds: list.vendorIds.filter((id) => validIds.has(id)),
+            }
+          : list,
       );
     });
     setPublicLists((current) => [

@@ -1,9 +1,6 @@
 import { supabase } from './supabase';
 import type { LineStatus, Vendor, VendorType } from '../types';
 
-const FEATURED_IMAGES: Record<string, string> = {
-  'bacon mania': '/vendors/bacon-mania.png',
-};
 const VENDOR_IMAGE_BUCKET = 'vendor-images';
 
 type VendorRow = {
@@ -69,7 +66,7 @@ function mapRows(rows: VendorRow[]): Vendor[] {
     imagePath: row.image_path,
     featuredImageUrl: row.image_path
       ? supabase.storage.from(VENDOR_IMAGE_BUCKET).getPublicUrl(row.image_path).data.publicUrl
-      : FEATURED_IMAGES[row.name.trim().toLocaleLowerCase()],
+      : undefined,
   }));
 }
 
