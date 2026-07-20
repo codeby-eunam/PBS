@@ -12,11 +12,13 @@ export async function syncRemoteList(userId: string, list: UserList) {
     title: list.title,
     visibility: list.visibility,
   };
-  const { error: insertError } = await supabase.from("user_lists").insert(row);
-  if (!insertError) return;
-  if (insertError.code !== "23505") throw insertError;
+  const { error: insertError } = await supabase
+    .from("user_lists")
+    .upsert(row, { onConflict: "id", ignoreDuplicates: true });
+  if (insertError) throw insertError;
 
-  // The row already exists, so only editable metadata is synchronized.
+  // Keep editable metadata synchronized whether the row was just created or
+  // already existed. `ignoreDuplicates` avoids an expected 409 response.
   const { error: updateError } = await supabase
     .from("user_lists")
     .update({ title: list.title, visibility: list.visibility })
