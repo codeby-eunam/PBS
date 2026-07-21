@@ -1,7 +1,7 @@
-import { supabase } from './supabase';
-import type { LineStatus, Vendor, VendorType } from '../types';
+import { supabase } from "./supabase";
+import type { LineStatus, Vendor, VendorType } from "../types";
 
-const VENDOR_IMAGE_BUCKET = 'vendor-images';
+const VENDOR_IMAGE_BUCKET = "vendor-images";
 
 type VendorRow = {
   id: string;
@@ -20,6 +20,11 @@ type VendorRow = {
   is_active: boolean;
   sort_order: number;
   image_path: string | null;
+  location_name: string | null;
+  booth_number: string | null;
+  zone: string | null;
+  latitude: number | null;
+  longitude: number | null;
 };
 
 function mapRows(rows: VendorRow[]): Vendor[] {
@@ -33,7 +38,9 @@ function mapRows(rows: VendorRow[]): Vendor[] {
       uniqueRows.set(key, row);
       continue;
     }
-    const merge = (left: string[] = [], right: string[] = []) => [...new Set([...left, ...right])];
+    const merge = (left: string[] = [], right: string[] = []) => [
+      ...new Set([...left, ...right]),
+    ];
     uniqueRows.set(key, {
       ...current,
       cuisines: merge(current.cuisines, row.cuisines),
@@ -64,22 +71,63 @@ function mapRows(rows: VendorRow[]): Vendor[] {
     source: row.source,
     isActive: row.is_active,
     imagePath: row.image_path,
+    locationName: row.location_name,
+    boothNumber: row.booth_number,
+    zone: row.zone,
+    latitude: row.latitude,
+    longitude: row.longitude,
     featuredImageUrl: row.image_path
-      ? supabase.storage.from(VENDOR_IMAGE_BUCKET).getPublicUrl(row.image_path).data.publicUrl
+      ? supabase.storage.from(VENDOR_IMAGE_BUCKET).getPublicUrl(row.image_path)
+          .data.publicUrl
       : undefined,
+  }));
+}
+
+async function attachGalleryImages(vendors: Vendor[]) {
+  if (!vendors.length) return vendors;
+  const { data, error } = await supabase
+    .from("vendor_photos")
+    .select("vendor_id,storage_path,sort_order")
+    .in(
+      "vendor_id",
+      vendors.map((vendor) => vendor.id),
+    )
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true });
+  // The gallery migration is additive. Keep the catalog working before it is applied.
+  if (error) return vendors;
+  const urls = new Map<string, string[]>();
+  for (const photo of data ?? []) {
+    const current = urls.get(photo.vendor_id) ?? [];
+    current.push(
+      supabase.storage
+        .from(VENDOR_IMAGE_BUCKET)
+        .getPublicUrl(photo.storage_path).data.publicUrl,
+    );
+    urls.set(photo.vendor_id, current);
+  }
+  return vendors.map((vendor) => ({
+    ...vendor,
+    galleryImageUrls: [
+      ...(vendor.featuredImageUrl ? [vendor.featuredImageUrl] : []),
+      ...(urls.get(vendor.id) ?? []),
+    ].filter((url, index, all) => all.indexOf(url) === index),
   }));
 }
 
 export async function getVendorCount(): Promise<number> {
   const { count, error } = await supabase
-    .from('vendors')
-    .select('id', { count: 'exact', head: true })
-    .eq('is_active', true);
+    .from("vendors")
+    .select("id", { count: "exact", head: true })
+    .eq("is_active", true);
   if (error) throw error;
   return count ?? 0;
 }
 
-export async function getVendorBatch(offset: number, limit: number): Promise<{vendors: Vendor[]; rawCount: number}> {
+export async function getVendorBatch(
+  offset: number,
+  limit: number,
+): Promise<{ vendors: Vendor[]; rawCount: number }> {
   if (limit <= 0) return { vendors: [], rawCount: 0 };
   const rows: VendorRow[] = [];
   const requestSize = 100;
@@ -87,17 +135,20 @@ export async function getVendorBatch(offset: number, limit: number): Promise<{ve
     const from = offset + rows.length;
     const size = Math.min(requestSize, limit - rows.length);
     const { data, error } = await supabase
-      .from('vendors')
-      .select('*')
-      .eq('is_active', true)
-      .order('sort_order', { ascending: true })
-      .order('name', { ascending: true })
-      .order('id', { ascending: true })
+      .from("vendors")
+      .select("*")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true })
+      .order("id", { ascending: true })
       .range(from, from + size - 1);
     if (error) throw error;
     const page = (data ?? []) as VendorRow[];
     rows.push(...page);
     if (page.length < size) break;
   }
-  return { vendors: mapRows(rows), rawCount: rows.length };
+  return {
+    vendors: await attachGalleryImages(mapRows(rows)),
+    rawCount: rows.length,
+  };
 }

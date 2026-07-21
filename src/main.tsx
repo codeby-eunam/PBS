@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
 import { Bookmark, Compass, Heart, User } from "lucide-react";
 import { AuthProvider, useAuth } from "./auth/AuthProvider";
 import * as AppModals from "./components/AppModals";
@@ -158,6 +157,7 @@ const routeFromHash = (): Route => {
       "liked",
       "swipe",
       "tournament",
+      "single-vendor",
     ].includes(hash)
       ? hash
       : "discover",
@@ -324,9 +324,10 @@ function App() {
     tourneyPicks,
     winner,
     setWinner,
+    singleVendorId,
+    startListDecision,
     startTournament,
-    setTourney,
-    setTourneyPicks,
+    pickTournament,
   } = useGameFlow({
     vendorMap,
     navigate: (name) => {
@@ -443,6 +444,8 @@ function App() {
             .map((vendor) => vendor.id)
         : route.name === "vendor" && route.id
           ? [route.id]
+          : route.name === "single-vendor" && singleVendorId
+            ? [singleVendorId]
           : route.name === "swipe" && swipeIds[swipeAt]
             ? [swipeIds[swipeAt]]
             : route.name === "tournament"
@@ -452,6 +455,7 @@ function App() {
   }, [
     route.name,
     route.id,
+    singleVendorId,
     swipeIds,
     swipeAt,
     tourney,
@@ -838,8 +842,12 @@ function App() {
           openSave(currentList.vendorIds, "Move List", currentList.id, true)
         }
         onCopyList={() => openSave(currentList.vendorIds, "Copy List")}
-        onSwipe={() => startSwipe(items.map((item) => item.id))}
-        onTournament={() => startTournament(items.map((item) => item.id))}
+        onStartChoosing={() =>
+          startListDecision(
+            items.map((item) => item.id),
+            currentList.title,
+          )
+        }
         onTastingList={() =>
           setLists((current) => [
             ...current,
@@ -961,6 +969,60 @@ function App() {
         }
       />
     );
+  } else if (route.name === "single-vendor") {
+    const singleVendor = singleVendorId
+      ? vendorMap.get(singleVendorId)
+      : undefined;
+    if (singleVendor) {
+      const history = reports[singleVendor.id] || [];
+      const ownRecent = findRecentDeviceReport(history, deviceId);
+      screen = (
+        <VendorDetailScreen
+          vendor={withCurrentLine(singleVendor)}
+          onBack={leaveTournament}
+          saved={Boolean(user) && lists.some((list) => list.vendorIds.includes(singleVendor.id))}
+          onSave={() => openSave([singleVendor.id])}
+          history={history}
+          deviceId={deviceId}
+          canUndoLineReport={Boolean(ownRecent)}
+          onUndoLineReport={() =>
+            setReports((current) => ({
+              ...current,
+              [singleVendor.id]: (current[singleVendor.id] || []).filter((item) => item !== ownRecent),
+            }))
+          }
+          reviews={reviews.filter((review) => review.vendor_id === singleVendor.id)}
+          reviewsLoading={reviewsLoading}
+          reviewsUnavailable={reviewLoadErrors.has(singleVendor.id)}
+          onRefreshReviews={() => refreshVendorReviews(singleVendor.id)}
+          onNotify={(message) => setSnackbar({ message })}
+          photos={communityPhotos.filter((photo) => photo.vendorId === singleVendor.id)}
+          photoUploadsOpen={photoUploadsOpen}
+          lineReportsOpen={lineReportsOpen}
+          onLineReport={(status) => {
+            if (!lineReportsAreOpen()) {
+              setSnackbar({ message: "Line updates are currently closed." });
+              return;
+            }
+            const change = applyLineReport(history, deviceId, status);
+            if (change.result !== "duplicate")
+              setReports((current) => ({ ...current, [singleVendor.id]: change.history }));
+            setSnackbar({ message: lineReportMessages[change.result] });
+          }}
+          decisionActions={{
+            onChoose: () => {
+              setLiked((items) => items.includes(singleVendor.id) ? items : [...items, singleVendor.id]);
+              setWinner(singleVendor.id);
+              setPlayed((count) => count + 1);
+              go("result", singleVendor.id);
+            },
+            onPass: leaveTournament,
+          }}
+        />
+      );
+    } else {
+      screen = <div className="empty"><h1>Vendor unavailable</h1><button onClick={leaveTournament}>Back</button></div>;
+    }
   } else if (route.name === "swipe") {
     const raw = vendorMap.get(swipeIds[swipeAt]);
     const current = raw ? withCurrentLine(raw) : undefined;
@@ -1016,10 +1078,7 @@ function App() {
           picks={tourneyPicks}
           totalPicks={tourneyStart.length - 1}
           source={tourneySource.label}
-          onPick={(id) => {
-            setTourney([id, ...tourney.slice(2)]);
-            setTourneyPicks((count) => count + 1);
-          }}
+          onPick={pickTournament}
           onExit={leaveTournament}
         />
       ) : (
@@ -1045,26 +1104,24 @@ function App() {
         : undefined;
     screen = (
       <div className="result">
-        <p>Tournament Winner</p>
+        <p>{tourneyStart.length === 1 ? "Your Pick" : "Tournament Winner"}</p>
         <h1>{result?.name}</h1>
         <button onClick={() => result && openSave([result.id])}>
           Save to List
         </button>
-        <button
-          onClick={() => startTournament(tourneyStart, tourneySource.label)}
-        >
-          Restart Tournament
-        </button>
+        {tourneyStart.length > 1 && (
+          <button
+            onClick={() => startTournament(tourneyStart, tourneySource.label)}
+          >
+            Restart Tournament
+          </button>
+        )}
         <button onClick={leaveTournament}>Back</button>
       </div>
     );
   }
-  const playable =
-    route.name === "liked"
-      ? liked.filter((id) => vendorMap.has(id))
-      : route.name === "list" && currentList
-        ? currentList.vendorIds.filter((id) => vendorMap.has(id))
-        : [];
+  const likedPlayable =
+    route.name === "liked" ? liked.filter((id) => vendorMap.has(id)) : [];
   const tab = ["discover", "lists", "picks", "profile"].includes(route.name)
     ? route.name
     : "";
@@ -1073,10 +1130,10 @@ function App() {
       <div className="brand">
         The Bite <span>July 24–26</span>
       </div>
-      {playable.length > 0 && (
+      {likedPlayable.length > 0 && (
         <div className="list-play-actions">
-          <button onClick={() => startSwipe(playable)}>Start Swipe</button>
-          <button onClick={() => startTournament(playable)}>
+          <button onClick={() => startSwipe(likedPlayable)}>Start Swipe</button>
+          <button onClick={() => startTournament(likedPlayable)}>
             Start Tournament
           </button>
         </div>
@@ -1238,8 +1295,6 @@ function Snackbar({
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(
-  <AuthProvider>
-    <App />
-  </AuthProvider>,
-);
+export function LegacyApp() {
+  return <AuthProvider><App /></AuthProvider>;
+}

@@ -4,6 +4,11 @@ import {
   type SwipeSession,
 } from "../lib/cacheNormalization";
 import { readStorage, removeStorage, writeStorage } from "../lib/storage";
+import {
+  advanceTournament,
+  shuffleTournament,
+  type TournamentBracket,
+} from "../lib/tournament";
 import type { Vendor } from "../types";
 
 export function useGameFlow({
@@ -23,7 +28,10 @@ export function useGameFlow({
   const [savedSwipe, setSavedSwipe] = useState<SwipeSession | null>(() =>
     cleanSwipeSession(readStorage("bos-swipe-progress", null)),
   );
-  const [tourney, setTourney] = useState<string[]>([]);
+  const [tournament, setTournament] = useState<TournamentBracket>({
+    remaining: [],
+    advancing: [],
+  });
   const [tourneyStart, setTourneyStart] = useState<string[]>([]);
   const [tourneySource, setTourneySource] = useState({
     hash: "#picks",
@@ -31,6 +39,7 @@ export function useGameFlow({
   });
   const [tourneyPicks, setTourneyPicks] = useState(0);
   const [winner, setWinner] = useState<string>();
+  const [singleVendorId, setSingleVendorId] = useState<string>();
 
   const startSwipe = (ids: string[]) => {
     const valid = ids.filter((id) => vendorMap.has(id));
@@ -73,15 +82,36 @@ export function useGameFlow({
       return;
     }
     track("tournament_start", String(valid.length));
-    setTourney(valid);
+    setTournament({ remaining: shuffleTournament(valid), advancing: [] });
     setTourneyStart(valid);
     setTourneySource({ hash: location.hash || "#picks", label });
     setTourneyPicks(0);
     setWinner(undefined);
     navigate("tournament");
   };
+  const startListDecision = (ids: string[], label = "Selected vendors") => {
+    const valid = [...new Set(ids.filter((id) => vendorMap.has(id)))];
+    if (!valid.length) {
+      notify("Add at least 1 vendor to start choosing");
+      return;
+    }
+    if (valid.length === 1) {
+      track("single_vendor_start", valid[0]);
+      setSingleVendorId(valid[0]);
+      setTourneyStart(valid);
+      setTourneySource({ hash: location.hash || "#picks", label });
+      setWinner(undefined);
+      navigate("single-vendor");
+      return;
+    }
+    if (valid.length <= 8) {
+      startTournament(valid, label);
+      return;
+    }
+    startSwipe(valid);
+  };
   const pickTournament = (id: string) => {
-    setTourney((current) => [id, ...current.slice(2)]);
+    setTournament((current) => advanceTournament(current, id));
     setTourneyPicks((count) => count + 1);
   };
 
@@ -96,14 +126,14 @@ export function useGameFlow({
     resetSwipe,
     saveSwipe,
     resumeSwipe,
-    tourney,
+    tourney: tournament.remaining,
     tourneyStart,
     tourneySource,
     tourneyPicks,
     winner,
     setWinner,
-    setTourney,
-    setTourneyPicks,
+    singleVendorId,
+    startListDecision,
     startTournament,
     pickTournament,
   };

@@ -57,6 +57,12 @@ export type Vendor = {
   isActive: boolean;
   imagePath?: string | null;
   featuredImageUrl?: string;
+  galleryImageUrls?: string[];
+  locationName?: string | null;
+  boothNumber?: string | null;
+  zone?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 };
 export type UserList = {
   id: string;

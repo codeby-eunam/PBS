@@ -341,17 +341,32 @@ export function VendorPickerModal({
   );
   return (
     <Modal close={close}>
-      <h2>Add vendors</h2>
-      <label>
-        Search vendors
+      <div className="vendor-picker-heading">
+        <span className="vendor-picker-icon"><Plus /></span>
+        <div>
+          <h2>Add vendors</h2>
+          <p className="modal-copy">Choose vendors to add to this list.</p>
+        </div>
+      </div>
+      <label className="vendor-picker-search">
+        <Search />
         <input
+          aria-label="Search vendors"
+          placeholder="Search vendors"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
       </label>
-      <div className="manual-list">
+      <div className="vendor-picker-summary">
+        <span>{matches.length} vendors</span>
+        <b>{selected.length} selected</b>
+      </div>
+      <div className="manual-list vendor-picker-list">
         {matches.map((vendor) => (
-          <label key={vendor.id}>
+          <label
+            key={vendor.id}
+            className={selected.includes(vendor.id) ? "selected" : ""}
+          >
             <input
               type="checkbox"
               checked={selected.includes(vendor.id)}
@@ -363,12 +378,22 @@ export function VendorPickerModal({
                 )
               }
             />
-            <span>{vendor.name}</span>
+            <span className="vendor-picker-check"><Check /></span>
+            <span className="vendor-picker-copy">
+              <b>{vendor.name}</b>
+              <small>
+                {vendor.menuItems.slice(0, 2).join(" · ") ||
+                  vendor.foodTypes.join(" · ")}
+              </small>
+            </span>
           </label>
         ))}
+        {!matches.length && (
+          <p className="vendor-picker-empty">No vendors match “{query}”.</p>
+        )}
       </div>
       <button
-        className="primary modal-action"
+        className="primary modal-action vendor-picker-action"
         disabled={!selected.length}
         onClick={() => add(selected)}
       >

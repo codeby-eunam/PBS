@@ -2,10 +2,9 @@ import {
   Bookmark,
   Check,
   Copy,
-  Heart,
+  Sparkles,
   Plus,
   Share2,
-  Trophy,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -24,8 +23,7 @@ export function ListScreen({
   onDelete,
   onMoveList,
   onCopyList,
-  onSwipe,
-  onTournament,
+  onStartChoosing,
   onTastingList,
   onShare,
   onFetchAll,
@@ -43,8 +41,7 @@ export function ListScreen({
   onDelete: () => void;
   onMoveList: () => void;
   onCopyList: () => void;
-  onSwipe: () => void;
-  onTournament: () => void;
+  onStartChoosing: () => void;
   onTastingList: () => void;
   onShare: () => void;
   onFetchAll: () => void;
@@ -121,14 +118,13 @@ export function ListScreen({
           </article>
         ),
       )}
-      <div className={`actions${owned ? "" : " fetch-actions"}`}>
+      <div
+        className={`actions ${owned ? "list-owned-actions" : "fetch-actions"}`}
+      >
         {owned ? (
           <>
-            <button className="primary" onClick={onSwipe}>
-              <Heart /> Start Swipe
-            </button>
-            <button onClick={onTournament}>
-              <Trophy /> Start Tournament
+            <button className="primary" onClick={onStartChoosing} disabled={!vendors.length}>
+              <Sparkles /> Start Choosing
             </button>
             <button onClick={onTastingList}>
               <Plus /> Tasting List

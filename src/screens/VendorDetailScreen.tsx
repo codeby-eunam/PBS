@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Bookmark, Flag, ImagePlus, Share2, Trash2 } from "lucide-react";
+import { Bookmark, Check, Flag, ImagePlus, Share2, Trash2, X } from "lucide-react";
 import { VendorReviews } from "../components/VendorReviews";
 import type { WaitReport } from "../features/lineReports";
 import type { CommunityPhoto, ReviewWithPhotos, Vendor } from "../types";
@@ -26,6 +26,10 @@ type Props = {
   canManageImage?: boolean;
   onImageUpload?: (file: File) => Promise<void>;
   onImageDelete?: () => Promise<void>;
+  decisionActions?: {
+    onChoose: () => void;
+    onPass: () => void;
+  };
 };
 
 export function VendorDetailScreen(props: Props) {
@@ -119,6 +123,16 @@ export function VendorDetailScreen(props: Props) {
         <span>{vendor.foodTypes.join(" · ")}</span>
       </div>
       <div className="detail-actions">
+        {props.decisionActions && (
+          <>
+            <button className="primary" onClick={props.decisionActions.onChoose}>
+              <Check /> Choose
+            </button>
+            <button onClick={props.decisionActions.onPass}>
+              <X /> Pass
+            </button>
+          </>
+        )}
         <button className="primary" onClick={props.onSave}>
           <Bookmark fill={props.saved ? "currentColor" : "none"} />{" "}
           {props.saved ? "Manage lists" : "Save to List"}
