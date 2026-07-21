@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import type { Vendor } from "../types";
 import { useVendorCatalog } from "../hooks/useVendorCatalog";
+import { getVendorGalleryImages } from "../lib/vendors";
 import {
   advanceMatch,
   buildSystemLists,
@@ -998,7 +999,18 @@ function VendorDetails({
     <section className="decision-screen">
       <Back onClick={onBack} />
       <p className="eyebrow">Vendor details</p>
-      <h1>{vendor.name}</h1>
+      <div className="vendor-title-row">
+        <h1>{vendor.name}</h1>
+        {vendor.instagramUrl && (
+          <a className="vendor-instagram-link" href={vendor.instagramUrl} target="_blank" rel="noreferrer" aria-label={`Open ${vendor.name} on Instagram`} title="View on Instagram">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="5" />
+              <circle cx="12" cy="12" r="4" />
+              <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+            </svg>
+          </a>
+        )}
+      </div>
       <VendorGallery vendor={vendor} />
       <p className="lede">
         {vendor.cuisines.join(" · ")} · {vendor.foodTypes.join(" · ")}
@@ -1018,11 +1030,6 @@ function VendorDetails({
           </button>
           <small>This is the only option in this list.</small>
         </div>
-      )}
-      {vendor.instagramUrl && (
-        <a href={vendor.instagramUrl} target="_blank" rel="noreferrer">
-          View Instagram
-        </a>
       )}
       <LineReporter vendor={vendor} />
     </section>
@@ -1087,9 +1094,18 @@ function VendorGallery({
   vendor: Vendor;
   compact?: boolean;
 }) {
-  const images =
+  const initialImages =
     vendor.galleryImageUrls ??
     (vendor.featuredImageUrl ? [vendor.featuredImageUrl] : []);
+  const [images, setImages] = useState(initialImages);
+  useEffect(() => {
+    let active = true;
+    setImages(initialImages);
+    void getVendorGalleryImages(vendor).then((next) => {
+      if (active) setImages(next);
+    });
+    return () => { active = false; };
+  }, [vendor.id, vendor.imagePath, vendor.galleryImageUrls, vendor.featuredImageUrl]);
   if (!images.length) return null;
   return (
     <div className={compact ? "vendor-gallery compact" : "vendor-gallery"}>

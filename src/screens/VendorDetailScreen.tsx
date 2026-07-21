@@ -38,9 +38,9 @@ export function VendorDetailScreen(props: Props) {
   const [imageBusy, setImageBusy] = useState(false);
   const [imageError, setImageError] = useState("");
   const galleryImages = [
-    ...(vendor.featuredImageUrl ? [vendor.featuredImageUrl] : []),
+    ...(vendor.galleryImageUrls ?? (vendor.featuredImageUrl ? [vendor.featuredImageUrl] : [])),
     ...photos.map((photo) => photo.imageUrl),
-  ].slice(0, 4);
+  ].filter((imageUrl, index, images) => images.indexOf(imageUrl) === index).slice(0, 4);
   const hasPhotos = galleryImages.length > 0;
   return (
     <>

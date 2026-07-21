@@ -24,7 +24,9 @@ export function SwipeScreen({
   onLike: () => void;
   onSave: () => void;
 }) {
-  const photo = photosOpen ? photos[0] : undefined;
+  const imageUrl = photosOpen
+    ? photos[0]?.imageUrl ?? vendor.galleryImageUrls?.[0] ?? vendor.featuredImageUrl
+    : vendor.galleryImageUrls?.[0] ?? vendor.featuredImageUrl;
   const lines = reviews
     .map((review) => review.comment || review.reason)
     .filter((line): line is string => Boolean(line));
@@ -37,11 +39,11 @@ export function SwipeScreen({
         {position} / {total}
       </div>
       <article className="swipe-text-card">
-        {photo && (
+        {imageUrl && (
           <img
             className="swipe-community-photo"
-            src={photo.imageUrl}
-            alt={`${vendor.name} community food photo`}
+            src={imageUrl}
+            alt={`${vendor.name} food photo`}
           />
         )}
         <header>

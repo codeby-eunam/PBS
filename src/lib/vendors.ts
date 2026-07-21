@@ -3,6 +3,23 @@ import type { LineStatus, Vendor, VendorType } from "../types";
 
 const VENDOR_IMAGE_BUCKET = "vendor-images";
 
+export async function getVendorGalleryImages(vendor: Vendor): Promise<string[]> {
+  const known = vendor.galleryImageUrls ?? (vendor.featuredImageUrl ? [vendor.featuredImageUrl] : []);
+  const folder = vendor.imagePath?.includes("/")
+    ? vendor.imagePath.slice(0, vendor.imagePath.lastIndexOf("/"))
+    : vendor.id;
+  const { data, error } = await supabase.storage
+    .from(VENDOR_IMAGE_BUCKET)
+    .list(folder, { limit: 20, sortBy: { column: "name", order: "asc" } });
+  if (error) return known;
+  const stored = (data ?? [])
+    .filter((item) => item.name && item.metadata)
+    .map((item) =>
+      supabase.storage.from(VENDOR_IMAGE_BUCKET).getPublicUrl(`${folder}/${item.name}`).data.publicUrl,
+    );
+  return [...known, ...stored].filter((url, index, urls) => urls.indexOf(url) === index);
+}
+
 type VendorRow = {
   id: string;
   name: string;
