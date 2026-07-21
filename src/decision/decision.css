@@ -518,8 +518,19 @@ h3.decision-section-header {
   max-width: 680px;
   margin: 10px auto 0;
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
+}
+.start-tournament-button {
+  flex-basis: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: 13px;
+  background: var(--evergreen, #256844);
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
 }
 .danger-text-button {
   color: #8f3028;

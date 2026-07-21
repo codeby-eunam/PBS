@@ -288,6 +288,23 @@ export function DecisionApp() {
           confirm("End now and make this vendor your final pick?") &&
           finish(session!, session!.vendorIds[session!.swipeIndex], "choose_now_from_swipe")
         }
+        onStartTournament={() => {
+          const interestedIds = session!.interestedIds;
+          if (interestedIds.length === 1)
+            return finish(session!, interestedIds[0], "swipe_single_remaining");
+          const tournament = {
+            ...session!,
+            tournamentRemaining: interestedIds,
+            tournamentAdvancing: [],
+            round: 1,
+          };
+          updateSession(tournament);
+          void trackEvent("tournament_started", anonymousId, {
+            sessionId: session!.id,
+            listId: session!.listId,
+          });
+          go(`/lists/${session!.listId}/tournament`);
+        }}
         onSkipAhead={() =>
           updateSession({
             ...session!,
@@ -727,6 +744,7 @@ function Swipe({
   onBack,
   onDecision,
   onChoose,
+  onStartTournament,
   onSkipAhead,
   onExplore,
 }: {
@@ -735,6 +753,7 @@ function Swipe({
   onBack: () => void;
   onDecision: (interested: boolean) => void;
   onChoose: () => void;
+  onStartTournament: () => void;
   onSkipAhead: () => void;
   onExplore: () => void;
 }) {
@@ -834,6 +853,11 @@ function Swipe({
         ← Swipe left if not for you &nbsp;·&nbsp; Swipe right if interested →
       </p>
       <div className="swipe-secondary-actions">
+        {session.interestedIds.length > 0 && (
+          <button className="start-tournament-button" onClick={onStartTournament}>
+            Start tournament now ({session.interestedIds.length})
+          </button>
+        )}
         {session.vendorIds.length - session.swipeIndex > 11 && (
           <button className="text-button" onClick={onSkipAhead}>Skip ahead 10</button>
         )}
