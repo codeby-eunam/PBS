@@ -1016,7 +1016,6 @@ function App() {
               setPlayed((count) => count + 1);
               go("result", singleVendor.id);
             },
-            onPass: leaveTournament,
           }}
         />
       );

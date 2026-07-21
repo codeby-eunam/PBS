@@ -40,6 +40,18 @@ body {
   color: #686158;
   font-size: 12px;
 }
+.decision-brand .decision-dates {
+  display: block;
+  margin-left: auto;
+  padding: 5px 10px;
+  border: 1px solid #e0dbd1;
+  border-radius: 999px;
+  background: #f1ebe1;
+  color: #bd4d2a;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
 .decision-screen {
   width: min(100%, 1040px);
   margin: auto;
@@ -102,9 +114,70 @@ body {
 .result-actions > * {
   min-width: 0;
 }
+.decision-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 14px;
+}
+.decision-section-header h3 {
+  margin: 0;
+  font-size: 15px;
+}
+h3.decision-section-header {
+  margin-top: 40px;
+}
+.decision-result-group:first-child h3.decision-section-header {
+  margin-top: 8px;
+}
+.decision-empty-note {
+  margin: 0;
+  color: #857b6f;
+  font-size: 13px;
+}
+.decision-sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #686158;
+}
+.decision-sort select {
+  border: 1px solid #d6d0c5;
+  border-radius: 9px;
+  background: #fff;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 12px;
+}
+.decision-quick-list {
+  margin-bottom: 32px;
+}
+.decision-quick-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: inherit;
+}
+.decision-quick-row:hover {
+  color: #bd4d2a;
+}
+.decision-quick-row b {
+  color: #bd4d2a;
+  font-size: 13px;
+}
 .decision-list-card {
   text-align: left;
-  min-height: 210px;
+  min-height: 150px;
   padding: 22px;
   border: 1px solid #e0dbd1;
   border-radius: 20px;
@@ -116,7 +189,13 @@ body {
   border-color: #bd4d2a;
   box-shadow: 0 15px 35px #3b281214;
 }
+.decision-card-emoji {
+  font-size: 32px;
+  line-height: 1;
+}
 .decision-list-card span {
+  display: block;
+  margin-top: 10px;
   font-size: 11px;
   text-transform: uppercase;
   color: #857b6f;
@@ -360,7 +439,7 @@ body {
 }
 .swipe-card {
   max-width: 680px;
-  min-height: 420px;
+  min-height: 560px;
   margin: 28px auto;
   padding: clamp(28px, 6vw, 58px);
   border: 1px solid #ded8ce;
@@ -380,6 +459,47 @@ body {
   color: #6d655a;
   line-height: 1.6;
 }
+.swipe-card {
+  position: relative;
+  user-select: none;
+  cursor: grab;
+  will-change: transform;
+}
+.swipe-card:active {
+  cursor: grabbing;
+}
+.swipe-badge {
+  position: absolute;
+  top: 20px;
+  z-index: 2;
+  padding: 8px 14px;
+  border: 3px solid;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+}
+.swipe-badge-like {
+  left: 20px;
+  color: #2e7d52;
+  border-color: #2e7d52;
+  transform: rotate(-8deg);
+}
+.swipe-badge-skip {
+  right: 20px;
+  color: #9c302b;
+  border-color: #9c302b;
+  transform: rotate(8deg);
+}
+.swipe-hint {
+  max-width: 680px;
+  margin: 14px auto 0;
+  color: #6b635a;
+  font-size: 12px;
+  text-align: center;
+}
 .three-actions {
   max-width: 680px;
   margin: auto;
@@ -394,9 +514,42 @@ body {
   background: #fff;
   font-weight: 800;
 }
-.swipe-card + .three-actions + .text-button {
-  display: block;
-  margin: 12px auto;
+.swipe-secondary-actions {
+  max-width: 680px;
+  margin: 10px auto 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.danger-text-button {
+  color: #8f3028;
+}
+.selected-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.selected-photo-grid figure {
+  position: relative;
+  margin: 0;
+}
+.selected-photo-grid img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 10px;
+}
+.selected-photo-grid button {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: #20211ce6;
+  color: white;
+  font-size: 20px;
 }
 .match-grid {
   display: grid;
@@ -477,7 +630,7 @@ body {
 }
 .visit-time-input {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) auto;
   gap: 8px;
 }
 .visit-time-input button {
@@ -573,12 +726,11 @@ body {
   .decision-screen {
     padding-top: 28px;
   }
-  .decision-grid,
   .match-grid {
     grid-template-columns: 1fr;
   }
   .decision-list-card {
-    min-height: 170px;
+    min-height: 140px;
   }
   .decision-request {
     grid-template-columns: 1fr;
@@ -664,7 +816,7 @@ body {
     grid-auto-columns: 88%;
   }
   .swipe-card {
-    min-height: 0;
+    min-height: 500px;
     margin: 22px auto;
     padding: 22px;
     border-radius: 22px;

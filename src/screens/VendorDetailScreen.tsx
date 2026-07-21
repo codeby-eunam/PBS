@@ -28,7 +28,7 @@ type Props = {
   onImageDelete?: () => Promise<void>;
   decisionActions?: {
     onChoose: () => void;
-    onPass: () => void;
+    onPass?: () => void;
   };
 };
 
@@ -128,9 +128,9 @@ export function VendorDetailScreen(props: Props) {
             <button className="primary" onClick={props.decisionActions.onChoose}>
               <Check /> Choose
             </button>
-            <button onClick={props.decisionActions.onPass}>
+            {props.decisionActions.onPass ? <button onClick={props.decisionActions.onPass}>
               <X /> Pass
-            </button>
+            </button> : <small>This is the only option in this list.</small>}
           </>
         )}
         <button className="primary" onClick={props.onSave}>

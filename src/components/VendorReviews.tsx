@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { createReviewId, deleteReview, reportContent, saveReviewWithPhotos, validateReviewPhotos } from '../lib/reviews';
 import type { ReviewInput, ReviewLineStatus, ReviewWithPhotos, Vendor } from '../types';
@@ -164,6 +164,8 @@ function ReviewEditor({
   const [createId] = useState(() => review?.id ?? createReviewId());
   const [uploadProgress, setUploadProgress] = useState('');
   const [detailsOpen, setDetailsOpen] = useState(Boolean(review));
+  const previews = useMemo(() => files.map((file) => URL.createObjectURL(file)), [files]);
+  useEffect(() => () => previews.forEach((url) => URL.revokeObjectURL(url)), [previews]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -248,7 +250,9 @@ function ReviewEditor({
             <label>Photos <span className="optional-label">Up to 3</span>
               <input type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={(event) => {const selected=Array.from(event.target.files??[]);const validationError=validateReviewPhotos(selected,review?.photos.length??0);if(validationError){setError(validationError);event.target.value='';return}setError('');setFiles(selected)}} />
             </label>
-            {files.length > 0 && <small>{files.map((file) => file.name).join(', ')}</small>}
+            {files.length > 0 && <div className="selected-photo-grid" aria-label={`${files.length} selected photos`}>
+              {files.map((file, index) => <figure key={`${file.name}-${file.lastModified}`}><img src={previews[index]} alt={`Selected photo ${index + 1}`} /><button type="button" aria-label={`Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></figure>)}
+            </div>}
           </div>}
           {uploadProgress && <p className="upload-progress" role="status">{uploadProgress}</p>}
           {error && <p className="field-error" role="alert">{error}</p>}

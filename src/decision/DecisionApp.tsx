@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import type { Vendor } from "../types";
 import { useVendorCatalog } from "../hooks/useVendorCatalog";
 import {
@@ -24,6 +24,41 @@ import {
   type ReviewDraft,
 } from "./api";
 import "./decision.css";
+
+const SWIPE_THRESHOLD = 100;
+const SWIPE_EXIT_DISTANCE = 560;
+
+const CATEGORY_EMOJI: Record<string, string> = {
+  "American Food": "🇺🇸",
+  "Chinese Food": "🇨🇳",
+  "Korean Food": "🇰🇷",
+  "Japanese Food": "🇯🇵",
+  "Thai Food": "🇹🇭",
+  "Vietnamese Food": "🇻🇳",
+  "Filipino Food": "🇵🇭",
+  "Indian Food": "🇮🇳",
+  "Mexican & Latin American Food": "🇲🇽",
+  "Middle Eastern Food": "🧆",
+  "African Food": "🌍",
+  "Caribbean Food": "🏝️",
+  "Hawaiian / Pacific Islander Food": "🌺",
+  "Burmese Food": "🇲🇲",
+  "Fusion / Mixed Cuisine": "🔀",
+  "Vegan-Friendly": "🌱",
+  "Vegetarian-Friendly": "🥦",
+  Halal: "☪️",
+  Dessert: "🍰",
+  "Desserts & Sweets": "🍰",
+  "Spicy Food": "🌶️",
+  "Kid-Friendly": "🎈",
+  Drinks: "🥤",
+  Beverages: "🥤",
+  Seafood: "🦐",
+  "BBQ / Grilled": "🍖",
+  "Gluten-Free-Leaning": "🌾",
+  "Dairy-Free-Leaning": "🥛",
+};
+const categoryEmoji = (list: DecisionList) => CATEGORY_EMOJI[list.name] ?? "🍴";
 
 type Route = {
   page: "home" | "list" | "swipe" | "tournament" | "result" | "vendor";
@@ -180,10 +215,12 @@ export function DecisionApp() {
     screen = (
       <Home
         lists={lists}
+        vendorMap={vendorMap}
         onOpen={(id) => {
           void trackEvent("list_viewed", anonymousId, { listId: id });
           go(`/lists/${id}`);
         }}
+        onOpenVendor={(id) => go(`/vendors/${id}`)}
         onRequest={async (value, query) => {
           await submitListRequest(value, query, anonymousId);
           setMessage("Your request has been submitted.");
@@ -210,6 +247,7 @@ export function DecisionApp() {
   else if (currentRoute.page === "swipe" && session?.listId === currentRoute.id)
     screen = (
       <Swipe
+        key={session!.swipeIndex}
         session={session!}
         vendorMap={vendorMap}
         onBack={() => go(`/lists/${session!.listId}`)}
@@ -247,11 +285,14 @@ export function DecisionApp() {
           go(`/lists/${session!.listId}/tournament`);
         }}
         onChoose={() =>
-          finish(
-            session!,
-            session!.vendorIds[session!.swipeIndex],
-            "choose_now_from_swipe",
-          )
+          confirm("End now and make this vendor your final pick?") &&
+          finish(session!, session!.vendorIds[session!.swipeIndex], "choose_now_from_swipe")
+        }
+        onSkipAhead={() =>
+          updateSession({
+            ...session!,
+            swipeIndex: Math.min(session!.swipeIndex + 10, session!.vendorIds.length - 1),
+          })
         }
         onExplore={() => go("/")}
       />
@@ -282,7 +323,10 @@ export function DecisionApp() {
             finish(next, next.resultVendorId, "tournament_winner");
           else updateSession(next);
         }}
-        onChoose={(id) => finish(session!, id, "choose_now_from_tournament")}
+        onChoose={(id) => {
+          if (confirm("End the match now and make this vendor your final pick?"))
+            finish(session!, id, "choose_now_from_tournament");
+        }}
         onVendor={(id) => go(`/vendors/${id}`)}
       />
     );
@@ -326,14 +370,6 @@ export function DecisionApp() {
             ? {
                 onChoose: () =>
                   finish(session!, vendor.id, "choose_now_from_tournament"),
-                onPass: () => {
-                  void trackEvent("single_vendor_passed", anonymousId, {
-                    sessionId: session!.id,
-                    listId: session!.listId,
-                    vendorId: vendor.id,
-                  });
-                  go(`/lists/${session!.listId}`);
-                },
               }
             : undefined
         }
@@ -360,6 +396,7 @@ export function DecisionApp() {
       <header className="decision-brand" onClick={() => go("/")}>
         <b>BITE PICKS</b>
         <span>Decide where to eat</span>
+        <span className="decision-dates">Jul 24 – Jul 26</span>
       </header>
       {screen}
       {message && (
@@ -371,33 +408,92 @@ export function DecisionApp() {
   );
 }
 
+type SortOrder = "featured" | "most-vendors" | "fewest-vendors" | "name";
+
 function Home({
   lists,
+  vendorMap,
   onOpen,
+  onOpenVendor,
   onRequest,
 }: {
   lists: DecisionList[];
+  vendorMap: Map<string, Vendor>;
   onOpen: (id: string) => void;
+  onOpenVendor: (id: string) => void;
   onRequest: (value: string, query: string) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<SortOrder>("featured");
   const [request, setRequest] = useState("");
   const [busy, setBusy] = useState(false);
-  const filtered = lists.filter((list) =>
-    [list.name, list.description, ...list.tags].some((value) =>
-      value.toLowerCase().includes(query.toLowerCase().trim()),
-    ),
+  const [requestStatus, setRequestStatus] = useState("");
+  const search = query.toLowerCase().trim();
+  const systemLists = lists.filter((list) => list.tags.includes("all"));
+  const sortedOtherLists = [...lists.filter((list) => !list.tags.includes("all"))].sort(
+    (a, b) => {
+      if (sort === "most-vendors") return b.vendorIds.length - a.vendorIds.length;
+      if (sort === "fewest-vendors") return a.vendorIds.length - b.vendorIds.length;
+      if (sort === "name") return a.name.localeCompare(b.name);
+      return 0;
+    },
   );
+  const browsing = !search;
+  const matchedLists = search
+    ? lists.filter((list) =>
+        [list.name, list.description, ...list.tags].some((value) =>
+          value.toLowerCase().includes(search),
+        ),
+      )
+    : [];
+  const allVendors = [...vendorMap.values()];
+  const matchedByName = search
+    ? allVendors.filter((vendor) => vendor.name.toLowerCase().includes(search))
+    : [];
+  const matchedByMenu = search
+    ? allVendors.filter(
+        (vendor) =>
+          !matchedByName.includes(vendor) &&
+          vendor.menuItems.some((item) => item.toLowerCase().includes(search)),
+      )
+    : [];
+  const noResults =
+    search &&
+    !matchedLists.length &&
+    !matchedByName.length &&
+    !matchedByMenu.length;
   const submit = async (value: string) => {
-    if (!value.trim() || busy) return;
+    if (busy) return;
+    if (!value.trim()) {
+      setRequestStatus("Enter a list name or request first.");
+      return;
+    }
     setBusy(true);
+    setRequestStatus("");
     try {
       await onRequest(value.trim(), query.trim());
       setRequest("");
+      setRequestStatus("Your request has been submitted.");
+    } catch {
+      setRequestStatus("Your request could not be submitted. Please try again.");
     } finally {
       setBusy(false);
     }
   };
+  const Card = ({ list }: { list: DecisionList }) => (
+    <button
+      className="decision-list-card"
+      key={list.id}
+      onClick={() => onOpen(list.id)}
+    >
+      <div className="decision-card-emoji" aria-hidden="true">
+        {categoryEmoji(list)}
+      </div>
+      <span>{list.tags.slice(0, 2).join(" · ")}</span>
+      <h2>{list.name}</h2>
+      <b>{list.vendorIds.length} vendors →</b>
+    </button>
+  );
   return (
     <section className="decision-screen">
       <div className="decision-hero">
@@ -409,24 +505,95 @@ function Home({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Burgers, vegetarian, under $15…"
+          placeholder="Burgers, vegetarian…"
         />
       </label>
-      <div className="decision-grid">
-        {filtered.map((list) => (
-          <button
-            className="decision-list-card"
-            key={list.id}
-            onClick={() => onOpen(list.id)}
-          >
-            <span>{list.tags.slice(0, 2).join(" · ")}</span>
-            <h2>{list.name}</h2>
-            <p>{list.description}</p>
-            <b>{list.vendorIds.length} vendors →</b>
-          </button>
-        ))}
-      </div>
-      {!filtered.length && (
+      {browsing ? (
+        <>
+          {systemLists.length > 0 && (
+            <div className="decision-quick-list">
+              {systemLists.map((list) => (
+                <button
+                  key={list.id}
+                  className="decision-quick-row"
+                  onClick={() => onOpen(list.id)}
+                >
+                  <span>{list.name}</span>
+                  <b>{list.vendorIds.length} →</b>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="decision-section-header">
+            <h3>Browse by category</h3>
+            <label className="decision-sort">
+              <span>Sort</span>
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value as SortOrder)}
+              >
+                <option value="featured">Featured</option>
+                <option value="most-vendors">Most vendors</option>
+                <option value="fewest-vendors">Fewest vendors</option>
+                <option value="name">Name (A–Z)</option>
+              </select>
+            </label>
+          </div>
+          <div className="decision-grid">
+            {sortedOtherLists.map((list) => (
+              <Card key={list.id} list={list} />
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="decision-result-group">
+            <h3 className="decision-section-header">Lists</h3>
+            {matchedLists.length ? (
+              <div className="decision-grid">
+                {matchedLists.map((list) => (
+                  <Card key={list.id} list={list} />
+                ))}
+              </div>
+            ) : (
+              <p className="decision-empty-note">No matching lists.</p>
+            )}
+          </div>
+          <div className="decision-result-group">
+            <h3 className="decision-section-header">Vendors</h3>
+            {matchedByName.length ? (
+              <div className="vendor-stack">
+                {matchedByName.map((vendor) => (
+                  <VendorCard
+                    key={vendor.id}
+                    vendor={vendor}
+                    onOpen={() => onOpenVendor(vendor.id)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="decision-empty-note">No matching vendors.</p>
+            )}
+          </div>
+          <div className="decision-result-group">
+            <h3 className="decision-section-header">Menu items</h3>
+            {matchedByMenu.length ? (
+              <div className="vendor-stack">
+                {matchedByMenu.map((vendor) => (
+                  <VendorCard
+                    key={vendor.id}
+                    vendor={vendor}
+                    onOpen={() => onOpenVendor(vendor.id)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="decision-empty-note">No matching menu items.</p>
+            )}
+          </div>
+        </>
+      )}
+      {noResults && (
         <div className="decision-empty">
           <h2>No lists found.</h2>
           <button onClick={() => submit(query)}>Request “{query}” list</button>
@@ -446,7 +613,8 @@ function Home({
           onChange={(e) => setRequest(e.target.value)}
           placeholder="List name or request"
         />
-        <button disabled={!request.trim() || busy}>Submit</button>
+        <button disabled={busy}>{busy ? "Submitting…" : "Submit"}</button>
+        {requestStatus && <small role="status">{requestStatus}</small>}
       </form>
     </section>
   );
@@ -545,7 +713,7 @@ function ListDetail({
           disabled={!vendors.length}
           onClick={onStart}
         >
-          Start
+          Start Choosing
         </button>
         {!vendors.length && <small>No available vendors in this list.</small>}
       </div>
@@ -559,6 +727,7 @@ function Swipe({
   onBack,
   onDecision,
   onChoose,
+  onSkipAhead,
   onExplore,
 }: {
   session: DecisionSession;
@@ -566,8 +735,14 @@ function Swipe({
   onBack: () => void;
   onDecision: (interested: boolean) => void;
   onChoose: () => void;
+  onSkipAhead: () => void;
   onExplore: () => void;
 }) {
+  const [dragX, setDragX] = useState(0);
+  const [exiting, setExiting] = useState<"like" | "skip" | null>(null);
+  const dragging = useRef(false);
+  const startX = useRef(0);
+
   if (session.swipeIndex >= session.vendorIds.length)
     return (
       <State
@@ -586,6 +761,36 @@ function Swipe({
         actionLabel="Continue"
       />
     );
+
+  const handlePointerDown = (event: PointerEvent<HTMLElement>) => {
+    if (exiting) return;
+    dragging.current = true;
+    startX.current = event.clientX;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const handlePointerMove = (event: PointerEvent<HTMLElement>) => {
+    if (!dragging.current) return;
+    setDragX(event.clientX - startX.current);
+  };
+  const endDrag = () => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    if (dragX > SWIPE_THRESHOLD) {
+      setExiting("like");
+      setDragX(SWIPE_EXIT_DISTANCE);
+      window.setTimeout(() => onDecision(true), 220);
+    } else if (dragX < -SWIPE_THRESHOLD) {
+      setExiting("skip");
+      setDragX(-SWIPE_EXIT_DISTANCE);
+      window.setTimeout(() => onDecision(false), 220);
+    } else {
+      setDragX(0);
+    }
+  };
+  const rotation = dragX / 18;
+  const likeOpacity = Math.min(Math.max(dragX / SWIPE_THRESHOLD, 0), 1);
+  const skipOpacity = Math.min(Math.max(-dragX / SWIPE_THRESHOLD, 0), 1);
+
   return (
     <section className="decision-screen">
       <Back onClick={onBack} />
@@ -596,7 +801,24 @@ function Swipe({
         <span>{session.interestedIds.length} interested</span>
       </div>
       <progress value={session.swipeIndex + 1} max={session.vendorIds.length} />
-      <article className="swipe-card">
+      <article
+        className="swipe-card"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        style={{
+          transform: `translateX(${dragX}px) rotate(${rotation}deg)`,
+          transition: dragging.current ? "none" : "transform .25s ease",
+          touchAction: "pan-y",
+        }}
+      >
+        <span className="swipe-badge swipe-badge-like" style={{ opacity: likeOpacity }}>
+          Interested
+        </span>
+        <span className="swipe-badge swipe-badge-skip" style={{ opacity: skipOpacity }}>
+          Not for me
+        </span>
         <VendorGallery vendor={vendor} compact />
         <p className="eyebrow">
           {vendor.cuisines.join(" · ") || vendor.vendorType}
@@ -605,20 +827,20 @@ function Swipe({
         <h3>
           {vendor.menuItems.slice(0, 2).join(" · ") || "Menu coming soon"}
         </h3>
-        <p>
-          {vendor.description || "A Bite of Seattle vendor worth a quick look."}
-        </p>
+        {vendor.description && <p>{vendor.description}</p>}
         <Location vendor={vendor} />
       </article>
-      <div className="three-actions">
-        <button onClick={() => onDecision(false)}>Not for me</button>
-        <button className="decision-primary" onClick={() => onDecision(true)}>
-          Interested
+      <p className="swipe-hint">
+        ← Swipe left if not for you &nbsp;·&nbsp; Swipe right if interested →
+      </p>
+      <div className="swipe-secondary-actions">
+        {session.vendorIds.length - session.swipeIndex > 11 && (
+          <button className="text-button" onClick={onSkipAhead}>Skip ahead 10</button>
+        )}
+        <button className="text-button danger-text-button" onClick={onChoose}>
+          End here with this vendor…
         </button>
       </div>
-      <button className="text-button" onClick={onChoose}>
-        Choose Now
-      </button>
     </section>
   );
 }
@@ -646,7 +868,7 @@ function Tournament({
   return (
     <section className="decision-screen">
       <Back onClick={onBack} />
-      <p className="eyebrow">Tournament · Round {session.round}</p>
+      <p className="eyebrow">Match · Round {session.round}</p>
       <h1>Choose one.</h1>
       <div className="match-grid">
         {candidates.map((v) => (
@@ -660,7 +882,7 @@ function Tournament({
               Choose {v.name}
             </button>
             <button className="text-button" onClick={() => onChoose(v.id)}>
-              Choose Now
+              End match with this vendor…
             </button>
           </article>
         ))}
@@ -698,7 +920,7 @@ function Result({
       <p>{vendor.description}</p>
       <Location vendor={vendor} directions />
       <p className="result-method">
-        Chosen via {method?.replaceAll("_", " ") || "direct link"}
+        {resultMethodLabel(method)}
       </p>
       <div className="result-actions">
         {vendor.latitude != null && vendor.longitude != null && (
@@ -728,6 +950,17 @@ function Result({
     </section>
   );
 }
+
+function resultMethodLabel(method?: ResultMethod) {
+  const labels: Record<ResultMethod, string> = {
+    choose_now_from_swipe: "Picked early during swipe",
+    choose_now_from_tournament: "Picked early during the match",
+    swipe_single_remaining: "Selected from your interested vendors",
+    tournament_winner: "Selected as the match winner",
+  };
+  return method ? labels[method] : "Shared pick";
+}
+
 function VendorDetails({
   vendor,
   onBack,
@@ -735,7 +968,7 @@ function VendorDetails({
 }: {
   vendor: Vendor;
   onBack: () => void;
-  decisionActions?: { onChoose: () => void; onPass: () => void };
+  decisionActions?: { onChoose: () => void };
 }) {
   return (
     <section className="decision-screen">
@@ -759,7 +992,7 @@ function VendorDetails({
           <button className="decision-primary" onClick={decisionActions.onChoose}>
             Choose
           </button>
-          <button onClick={decisionActions.onPass}>Pass</button>
+          <small>This is the only option in this list.</small>
         </div>
       )}
       {vendor.instagramUrl && (
@@ -800,6 +1033,7 @@ function Location({
   directions?: boolean;
 }) {
   const known = vendor.locationName || vendor.boothNumber || vendor.zone;
+  if (!known && !directions) return null;
   return (
     <div className="location">
       <b>
@@ -815,7 +1049,8 @@ function Location({
       </b>
       {!known && directions && (
         <span>
-          Location will be updated when the festival map is available.
+          Booth locations will be added once the festival map is available
+          (Jul 24–26).
         </span>
       )}
     </div>
@@ -1000,11 +1235,18 @@ function ReviewForm({
       </label>
       <label>
         Visit time
-        <div className="visit-time-input">
+        <div className="visit-time-input" aria-label="Visit date and time">
           <input
-            type="datetime-local"
-            value={draft.visitedAt}
-            onChange={(e) => patch({ visitedAt: e.target.value })}
+            type="date"
+            aria-label="Visit date"
+            value={draft.visitedAt.slice(0, 10)}
+            onChange={(e) => patch({ visitedAt: combineVisitDateTime(e.target.value, draft.visitedAt.slice(11, 16)) })}
+          />
+          <input
+            type="time"
+            aria-label="Visit time"
+            value={draft.visitedAt.slice(11, 16)}
+            onChange={(e) => patch({ visitedAt: combineVisitDateTime(draft.visitedAt.slice(0, 10), e.target.value) })}
           />
           <button
             type="button"
@@ -1021,15 +1263,23 @@ function ReviewForm({
           multiple
           accept="image/jpeg,image/png,image/webp"
           onChange={(e) => {
-            const selected = [...(e.target.files ?? [])].slice(0, 3);
-            if (selected.some((f) => f.size > 5_000_000)) {
-              setError("Each photo must be 5 MB or smaller.");
+            const selected = [...(e.target.files ?? [])];
+            if (selected.length > 3) {
+              setError("You can upload up to 3 photos.");
+              e.target.value = "";
               return;
             }
+            if (selected.some((f) => f.size > 5_000_000)) {
+              setError("Each photo must be 5 MB or smaller.");
+              e.target.value = "";
+              return;
+            }
+            setError("");
             setPhotos(selected);
           }}
         />
       </label>
+      <SelectedPhotoGrid files={photos} onRemove={(index) => setPhotos((current) => current.filter((_, itemIndex) => itemIndex !== index))} />
       <small>
         Upload only photos you took yourself. Do not upload identifiable people
         without permission. Photos may be reviewed before display.
@@ -1041,9 +1291,29 @@ function ReviewForm({
     </form>
   );
 }
+
+function SelectedPhotoGrid({ files, onRemove }: { files: File[]; onRemove: (index: number) => void }) {
+  const previews = useMemo(() => files.map((file) => URL.createObjectURL(file)), [files]);
+  useEffect(() => () => previews.forEach((url) => URL.revokeObjectURL(url)), [previews]);
+  if (!files.length) return null;
+  return (
+    <div className="selected-photo-grid" aria-label={`${files.length} selected photos`}>
+      {files.map((file, index) => (
+        <figure key={`${file.name}-${file.lastModified}`}>
+          <img src={previews[index]} alt={`Selected photo ${index + 1}`} />
+          <button type="button" aria-label={`Remove ${file.name}`} onClick={() => onRemove(index)}>×</button>
+        </figure>
+      ))}
+    </div>
+  );
+}
 function localDateTimeValue(date: Date) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 16);
+}
+function combineVisitDateTime(date: string, time: string) {
+  if (!date && !time) return "";
+  return `${date || localDateTimeValue(new Date()).slice(0, 10)}T${time || "12:00"}`;
 }
 
 function LineReporter({ vendor }: { vendor: Vendor }) {
