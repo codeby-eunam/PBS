@@ -74,6 +74,7 @@ export function ListScreen({
       {vendors.map((vendor, index) =>
         owned ? (
           <article key={vendor.id} className="vendor-row text-card managed-row">
+            {vendor.featuredImageUrl && <img className="vendor-thumbnail" src={vendor.featuredImageUrl} alt="" loading="lazy" />}
             <div onClick={() => onVendorOpen(vendor.id)}>
               <b>{vendor.name}</b>
               <p>
@@ -108,6 +109,7 @@ export function ListScreen({
             className="vendor-row text-card"
             onClick={() => onVendorOpen(vendor.id)}
           >
+            {vendor.featuredImageUrl && <img className="vendor-thumbnail" src={vendor.featuredImageUrl} alt="" loading="lazy" />}
             <div>
               <b>{vendor.name}</b>
               <p>

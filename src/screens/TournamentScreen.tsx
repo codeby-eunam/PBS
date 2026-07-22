@@ -71,6 +71,9 @@ function Candidate({
     "Price details coming soon";
   return (
     <article className="compare">
+      {vendor.featuredImageUrl && (
+        <img className="compare-photo" src={vendor.featuredImageUrl} alt={`${vendor.name} food`} />
+      )}
       <h2>{vendor.name}</h2>
       <div className="compare-facts">
         <small>Featured menu</small>

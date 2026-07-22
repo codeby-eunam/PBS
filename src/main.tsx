@@ -1105,6 +1105,9 @@ function App() {
       <div className="result">
         <p>{tourneyStart.length === 1 ? "Your Pick" : "Tournament Winner"}</p>
         <h1>{result?.name}</h1>
+        {result?.featuredImageUrl && (
+          <img className="result-vendor-photo" src={result.featuredImageUrl} alt={`${result.name} food`} />
+        )}
         <button onClick={() => result && openSave([result.id])}>
           Save to List
         </button>

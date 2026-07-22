@@ -898,6 +898,7 @@ function Tournament({
       <div className="match-grid">
         {candidates.map((v) => (
           <article key={v.id}>
+            <VendorGallery vendor={v} compact />
             <p>{v.cuisines.join(" · ") || v.vendorType}</p>
             <h2>{v.name}</h2>
             <b>{v.menuItems.slice(0, 2).join(" · ") || "Menu coming soon"}</b>
@@ -1043,8 +1044,17 @@ function VendorCard({
   vendor: Vendor;
   onOpen: () => void;
 }) {
+  const thumb = vendor.featuredImageUrl ?? vendor.galleryImageUrls?.[0];
   return (
     <article className="vendor-card">
+      {thumb && (
+        <img
+          className="vendor-card-thumb"
+          src={thumb}
+          alt={`${vendor.name} food`}
+          loading="lazy"
+        />
+      )}
       <div>
         <span>{vendor.cuisines.join(" · ") || vendor.vendorType}</span>
         <h2>{vendor.name}</h2>
@@ -1087,13 +1097,7 @@ function Location({
     </div>
   );
 }
-function VendorGallery({
-  vendor,
-  compact = false,
-}: {
-  vendor: Vendor;
-  compact?: boolean;
-}) {
+function useVendorImages(vendor: Vendor) {
   const initialImages =
     vendor.galleryImageUrls ??
     (vendor.featuredImageUrl ? [vendor.featuredImageUrl] : []);
@@ -1105,7 +1109,18 @@ function VendorGallery({
       if (active) setImages(next);
     });
     return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vendor.id, vendor.imagePath, vendor.galleryImageUrls, vendor.featuredImageUrl]);
+  return images;
+}
+function VendorGallery({
+  vendor,
+  compact = false,
+}: {
+  vendor: Vendor;
+  compact?: boolean;
+}) {
+  const images = useVendorImages(vendor);
   if (!images.length) return null;
   return (
     <div className={compact ? "vendor-gallery compact" : "vendor-gallery"}>
