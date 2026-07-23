@@ -660,6 +660,66 @@ h3.decision-section-header {
   grid-template-columns: 1fr 1fr;
   gap: 9px;
 }
+.validation-survey {
+  max-width: 680px;
+  margin: 40px auto;
+  padding: 28px;
+  border-radius: 18px;
+  background: #eee9df;
+  text-align: left;
+  display: grid;
+  gap: 20px;
+}
+.validation-survey h2,
+.validation-survey p {
+  margin: 0;
+}
+.validation-survey fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+.validation-survey legend {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 800;
+}
+.validation-survey legend small {
+  color: #756d62;
+  font-weight: 500;
+}
+.validation-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.validation-options button {
+  border: 1px solid #d1c9bd;
+  border-radius: 99px;
+  background: #fff;
+  padding: 10px 14px;
+}
+.validation-options button.active {
+  border-color: #1f201b;
+  background: #1f201b;
+  color: #fff;
+}
+.validation-options.five-point button {
+  flex: 1;
+  min-width: 72px;
+  display: grid;
+  gap: 2px;
+  text-align: center;
+}
+.validation-options.five-point span {
+  min-height: 13px;
+  font-size: 10px;
+}
+.validation-thanks {
+  text-align: center;
+}
 .review-panel {
   text-align: left;
   max-width: 680px;

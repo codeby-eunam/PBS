@@ -7,6 +7,7 @@ import {
   buildSystemLists,
   decisionStartMode,
   getAnonymousUserId,
+  getClientSessionId,
   SESSION_KEY,
   startSession,
   type DecisionList,
@@ -15,12 +16,15 @@ import {
 } from "./model";
 import {
   createDecisionSession,
+  completeAnalyticsSession,
   loadDecisionLists,
   notifyFeedbackInbox,
   saveDecisionResult,
+  startAnalyticsSession,
   submitLineReport,
   submitListRequest,
   submitReview,
+  submitValidationResponse,
   trackEvent,
   type ReviewDraft,
 } from "./api";
@@ -93,7 +97,10 @@ export function DecisionApp() {
   const [listsLoading, setListsLoading] = useState(true);
   const [session, setSession] = useState<DecisionSession | null>(loadSession);
   const [message, setMessage] = useState("");
+  const startInFlight = useRef(false);
+  const finishInFlight = useRef(false);
   const anonymousId = useMemo(getAnonymousUserId, []);
+  const clientSessionId = useMemo(getClientSessionId, []);
   const systemLists = buildSystemLists(catalog.vendors);
   const systemIds = new Set(systemLists.map((list) => list.id));
   const lists = [
@@ -120,6 +127,24 @@ export function DecisionApp() {
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
   }, []);
+  useEffect(() => {
+    void startAnalyticsSession(clientSessionId, anonymousId)
+      .then(() =>
+        trackEvent("session_started", anonymousId, {
+          metadata: { clientSessionId },
+        }),
+      )
+      .catch(() => {});
+    const completeVisit = () => {
+      void completeAnalyticsSession(clientSessionId, anonymousId).catch(
+        () => {},
+      );
+    };
+    addEventListener("pagehide", completeVisit);
+    return () => {
+      removeEventListener("pagehide", completeVisit);
+    };
+  }, [anonymousId, clientSessionId]);
   useEffect(() => {
     loadDecisionLists()
       .then(setRemoteLists)
@@ -150,30 +175,79 @@ export function DecisionApp() {
   }, [message]);
 
   const list = lists.find((item) => item.id === currentRoute.id);
-  const finish = (
+  const finish = async (
     next: DecisionSession,
     vendorId: string,
     method: ResultMethod,
   ) => {
+    if (finishInFlight.current) return;
+    finishInFlight.current = true;
     const done = { ...next, resultVendorId: vendorId, resultMethod: method };
-    updateSession(done);
-    void saveDecisionResult(done, anonymousId).catch(() => {});
-    go(`/result/${vendorId}`);
+    const decisionMethod =
+      done.vendorIds.length === 1
+        ? "single"
+        : method.startsWith("choose_now")
+          ? "choose_now"
+          : method === "swipe_single_remaining"
+            ? "swipe"
+            : done.vendorIds.length > 8
+              ? "swipe_then_tournament"
+              : "tournament";
+    try {
+      await saveDecisionResult(done, anonymousId, decisionMethod);
+      updateSession(done);
+      const completionEvent =
+        method === "tournament_winner"
+          ? "tournament_completed"
+          : method === "swipe_single_remaining"
+            ? "swipe_completed"
+            : method === "choose_now_from_swipe"
+              ? "choose_now_swipe"
+              : "choose_now_tournament";
+      void trackEvent(completionEvent, anonymousId, {
+        sessionId: done.id,
+        listId: done.listId,
+        vendorId,
+        metadata: { decisionMethod },
+      }).catch(() => {});
+      go(`/result/${vendorId}`);
+    } catch {
+      setMessage("We couldn't save your decision. Please try again.");
+    } finally {
+      finishInFlight.current = false;
+    }
   };
-  const start = (selected: DecisionList) => {
+  const start = async (selected: DecisionList) => {
+    if (startInFlight.current) return;
     const vendorIds = selected.vendorIds.filter((id) => vendorMap.has(id));
     if (!vendorIds.length) {
       setMessage("No available vendors in this list.");
       return;
     }
     const next = startSession({ ...selected, vendorIds });
+    const mode = decisionStartMode(vendorIds.length);
+    startInFlight.current = true;
+    try {
+      await startAnalyticsSession(clientSessionId, anonymousId);
+      await createDecisionSession(
+        next,
+        anonymousId,
+        clientSessionId,
+        vendorIds.length,
+        mode,
+      );
+    } catch {
+      setMessage("We couldn't start your decision. Please try again.");
+      return;
+    } finally {
+      startInFlight.current = false;
+    }
     updateSession(next);
-    void createDecisionSession(next, anonymousId).catch(() => {});
     void trackEvent("decision_started", anonymousId, {
       sessionId: next.id,
       listId: selected.id,
-    });
-    const mode = decisionStartMode(vendorIds.length);
+      metadata: { initialVendorCount: vendorIds.length, decisionMethod: mode },
+    }).catch(() => {});
     if (mode === "single") {
       go(`/vendors/${vendorIds[0]}`);
       return;
@@ -189,7 +263,7 @@ export function DecisionApp() {
       void trackEvent("tournament_started", anonymousId, {
         sessionId: next.id,
         listId: selected.id,
-      });
+      }).catch(() => {});
       go(`/lists/${selected.id}/tournament`);
       return;
     }
@@ -218,7 +292,9 @@ export function DecisionApp() {
         lists={lists}
         vendorMap={vendorMap}
         onOpen={(id) => {
-          void trackEvent("list_viewed", anonymousId, { listId: id });
+          void trackEvent("list_viewed", anonymousId, { listId: id }).catch(
+            () => {},
+          );
           go(`/lists/${id}`);
         }}
         onOpenVendor={(id) => go(`/vendors/${id}`)}
@@ -227,7 +303,7 @@ export function DecisionApp() {
           setMessage("Your request has been submitted.");
           void trackEvent("list_requested", anonymousId, {
             metadata: { query },
-          });
+          }).catch(() => {});
         }}
       />
     );
@@ -266,12 +342,12 @@ export function DecisionApp() {
             interested ? "swipe_interested" : "swipe_not_for_me",
             anonymousId,
             { sessionId: session!.id, listId: session!.listId, vendorId },
-          );
+          ).catch(() => {});
           if (next.swipeIndex < next.vendorIds.length)
             return updateSession(next);
           if (!interestedIds.length) return updateSession(next);
           if (interestedIds.length === 1)
-            return finish(next, interestedIds[0], "swipe_single_remaining");
+            return void finish(next, interestedIds[0], "swipe_single_remaining");
           const tournament = {
             ...next,
             tournamentRemaining: interestedIds,
@@ -282,17 +358,17 @@ export function DecisionApp() {
           void trackEvent("tournament_started", anonymousId, {
             sessionId: session!.id,
             listId: session!.listId,
-          });
+          }).catch(() => {});
           go(`/lists/${session!.listId}/tournament`);
         }}
         onChoose={() =>
           confirm("End now and make this vendor your final pick?") &&
-          finish(session!, session!.vendorIds[session!.swipeIndex], "choose_now_from_swipe")
+          void finish(session!, session!.vendorIds[session!.swipeIndex], "choose_now_from_swipe")
         }
         onStartTournament={() => {
           const interestedIds = session!.interestedIds;
           if (interestedIds.length === 1)
-            return finish(session!, interestedIds[0], "swipe_single_remaining");
+            return void finish(session!, interestedIds[0], "swipe_single_remaining");
           const tournament = {
             ...session!,
             tournamentRemaining: interestedIds,
@@ -303,7 +379,7 @@ export function DecisionApp() {
           void trackEvent("tournament_started", anonymousId, {
             sessionId: session!.id,
             listId: session!.listId,
-          });
+          }).catch(() => {});
           go(`/lists/${session!.listId}/tournament`);
         }}
         onSkipAhead={() =>
@@ -336,14 +412,14 @@ export function DecisionApp() {
             sessionId: session!.id,
             listId: session!.listId,
             vendorId: id,
-          });
+          }).catch(() => {});
           if (next.resultVendorId)
-            finish(next, next.resultVendorId, "tournament_winner");
+            void finish(next, next.resultVendorId, "tournament_winner");
           else updateSession(next);
         }}
         onChoose={(id) => {
           if (confirm("End the match now and make this vendor your final pick?"))
-            finish(session!, id, "choose_now_from_tournament");
+            void finish(session!, id, "choose_now_from_tournament");
         }}
         onVendor={(id) => go(`/vendors/${id}`)}
       />
@@ -357,6 +433,12 @@ export function DecisionApp() {
           session?.resultVendorId === vendor.id
             ? session.resultMethod
             : undefined
+        }
+        decisionSessionId={
+          session?.resultVendorId === vendor.id ? session.id : undefined
+        }
+        listId={
+          session?.resultVendorId === vendor.id ? session.listId : undefined
         }
         anonymousId={anonymousId}
         onVendor={() => go(`/vendors/${vendor.id}`)}
@@ -387,7 +469,7 @@ export function DecisionApp() {
           isSingleDecision
             ? {
                 onChoose: () =>
-                  finish(session!, vendor.id, "choose_now_from_tournament"),
+                  void finish(session!, vendor.id, "choose_now_from_tournament"),
               }
             : undefined
         }
@@ -920,6 +1002,8 @@ function Tournament({
 function Result({
   vendor,
   method,
+  decisionSessionId,
+  listId,
   anonymousId,
   onVendor,
   onExplore,
@@ -927,12 +1011,25 @@ function Result({
 }: {
   vendor: Vendor;
   method?: ResultMethod;
+  decisionSessionId?: string;
+  listId?: string;
   anonymousId: string;
   onVendor: () => void;
   onExplore: () => void;
   onMessage: (value: string) => void;
 }) {
   const [reviewing, setReviewing] = useState(false);
+  const resultViewTracked = useRef(false);
+  useEffect(() => {
+    if (resultViewTracked.current) return;
+    resultViewTracked.current = true;
+    void trackEvent("result_viewed", anonymousId, {
+      sessionId: decisionSessionId,
+      listId,
+      vendorId: vendor.id,
+      metadata: { resultMethod: method ?? "shared_or_direct" },
+    }).catch(() => {});
+  }, [anonymousId, decisionSessionId, listId, method, vendor.id]);
   return (
     <section className="decision-screen result-screen">
       <p className="eyebrow">Your pick</p>
@@ -963,6 +1060,14 @@ function Result({
         <button onClick={() => setReviewing(true)}>Add Review</button>
         <button onClick={onExplore}>Explore Other Lists</button>
       </div>
+      {decisionSessionId && (
+        <ValidationSurvey
+          decisionSessionId={decisionSessionId}
+          listId={listId}
+          vendorId={vendor.id}
+          anonymousId={anonymousId}
+        />
+      )}
       {reviewing && (
         <ReviewForm
           vendor={vendor}
@@ -974,6 +1079,112 @@ function Result({
         />
       )}
     </section>
+  );
+}
+
+function ValidationSurvey({
+  decisionSessionId,
+  listId,
+  vendorId,
+  anonymousId,
+}: {
+  decisionSessionId: string;
+  listId?: string;
+  vendorId: string;
+  anonymousId: string;
+}) {
+  const [easeScore, setEaseScore] = useState<1 | 2 | 3 | 4 | 5>();
+  const [comparison, setComparison] = useState<
+    "easier" | "same" | "harder"
+  >();
+  const [wouldUseAgain, setWouldUseAgain] = useState<boolean>();
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+
+  if (submitted)
+    return (
+      <section className="validation-survey validation-thanks" role="status">
+        <h2>Thanks for your feedback</h2>
+        <p>Your response helps us make choosing easier.</p>
+      </section>
+    );
+
+  return (
+    <form
+      className="validation-survey"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!easeScore || !comparison || submitting) return;
+        setSubmitting(true);
+        setError("");
+        try {
+          await submitValidationResponse(decisionSessionId, anonymousId, {
+            easeScore,
+            easierThanUsual: comparison,
+            wouldUseAgain,
+          });
+          setSubmitted(true);
+          void trackEvent("validation_submitted", anonymousId, {
+            sessionId: decisionSessionId,
+            listId,
+            vendorId,
+            metadata: { easeScore, easierThanUsual: comparison, wouldUseAgain },
+          }).catch(() => {});
+        } catch {
+          setError("Your response couldn't be saved. Please try again.");
+        } finally {
+          setSubmitting(false);
+        }
+      }}
+    >
+      <p className="eyebrow">Two quick questions</p>
+      <h2>Did Bite Picks make choosing easier?</h2>
+      <fieldset>
+        <legend>How easy was choosing today?</legend>
+        <div className="validation-options five-point">
+          {([1, 2, 3, 4, 5] as const).map((score) => (
+            <button
+              type="button"
+              key={score}
+              className={easeScore === score ? "active" : ""}
+              aria-pressed={easeScore === score}
+              onClick={() => setEaseScore(score)}
+            >
+              <b>{score}</b>
+              <span>{score === 1 ? "Very hard" : score === 5 ? "Very easy" : ""}</span>
+            </button>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Compared with your usual way, was this easier?</legend>
+        <div className="validation-options">
+          {(["easier", "same", "harder"] as const).map((value) => (
+            <button
+              type="button"
+              key={value}
+              className={comparison === value ? "active" : ""}
+              aria-pressed={comparison === value}
+              onClick={() => setComparison(value)}
+            >
+              {value === "easier" ? "Easier" : value === "same" ? "About the same" : "Harder"}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Would you use this service again? <small>Optional</small></legend>
+        <div className="validation-options">
+          <button type="button" className={wouldUseAgain === true ? "active" : ""} aria-pressed={wouldUseAgain === true} onClick={() => setWouldUseAgain(true)}>Yes</button>
+          <button type="button" className={wouldUseAgain === false ? "active" : ""} aria-pressed={wouldUseAgain === false} onClick={() => setWouldUseAgain(false)}>No</button>
+        </div>
+      </fieldset>
+      {error && <p className="form-error">{error}</p>}
+      <button className="decision-primary" disabled={!easeScore || !comparison || submitting}>
+        {submitting ? "Submitting…" : "Submit Feedback"}
+      </button>
+    </form>
   );
 }
 
@@ -1220,7 +1431,7 @@ function ReviewForm({
           await submitReview(vendor.id, anonymousId, draft, photos);
           void trackEvent("review_submitted", anonymousId, {
             vendorId: vendor.id,
-          });
+          }).catch(() => {});
           onDone();
         } catch {
           setError("Review could not be submitted. Please try again.");

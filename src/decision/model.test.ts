@@ -4,6 +4,7 @@ import {
   buildSystemLists,
   decisionStartMode,
   startSession,
+  SYSTEM_LIST_IDS,
 } from "./model";
 
 describe("decision start mode", () => {
@@ -63,5 +64,15 @@ describe("decision lists", () => {
       "ALL GAMES",
       "ALL SHOPPINGS",
     ]);
+  });
+
+  it("uses database-compatible UUIDs for system lists", () => {
+    const ids = buildSystemLists([]).map((list) => list.id);
+    expect(ids).toEqual(Object.values(SYSTEM_LIST_IDS));
+    for (const id of ids) {
+      expect(id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+    }
   });
 });

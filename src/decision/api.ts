@@ -54,30 +54,69 @@ export async function notifyFeedbackInbox(input: {
 export async function saveDecisionResult(
   session: DecisionSession,
   anonymousUserId: string,
+  decisionMethod: "single" | "swipe" | "tournament" | "swipe_then_tournament" | "choose_now",
 ) {
-  const { error } = await supabase
-    .from("decision_sessions")
-    .upsert({
-      id: session.id,
-      anonymous_user_id: anonymousUserId,
-      list_id: session.listId,
-      completed_at: new Date().toISOString(),
-      result_vendor_id: session.resultVendorId,
-      result_method: session.resultMethod,
-    });
+  if (!session.resultVendorId || !session.resultMethod)
+    throw new Error("A completed decision requires a winner and result method.");
+  const { error } = await supabase.rpc("complete_decision_session", {
+    p_session_id: session.id,
+    p_anonymous_user_id: anonymousUserId,
+    p_result_vendor_id: session.resultVendorId,
+    p_result_method: session.resultMethod,
+    p_decision_method: decisionMethod,
+  });
   if (error) throw error;
 }
 export async function createDecisionSession(
   session: DecisionSession,
   anonymousUserId: string,
+  clientSessionId: string,
+  initialVendorCount: number,
+  decisionMethod: "single" | "swipe" | "tournament",
 ) {
-  const { error } = await supabase
-    .from("decision_sessions")
-    .insert({
-      id: session.id,
-      anonymous_user_id: anonymousUserId,
-      list_id: session.listId,
-    });
+  const { error } = await supabase.rpc("start_decision_session", {
+    p_session_id: session.id,
+    p_anonymous_user_id: anonymousUserId,
+    p_client_session_id: clientSessionId,
+    p_list_id: session.listId,
+    p_initial_vendor_count: initialVendorCount,
+    p_decision_method: decisionMethod,
+  });
+  if (error) throw error;
+}
+export async function startAnalyticsSession(
+  clientSessionId: string,
+  anonymousUserId: string,
+) {
+  const { error } = await supabase.rpc("start_analytics_session", {
+    p_session_id: clientSessionId,
+    p_anonymous_user_id: anonymousUserId,
+    p_landing_path: `${location.pathname}${location.search}`,
+    p_referrer: document.referrer || null,
+    p_user_agent: navigator.userAgent,
+  });
+  if (error) throw error;
+}
+export async function recordAnalyticsActivity(
+  clientSessionId: string,
+  anonymousUserId: string,
+  decisionStarted = false,
+) {
+  const { error } = await supabase.rpc("record_analytics_activity", {
+    p_session_id: clientSessionId,
+    p_anonymous_user_id: anonymousUserId,
+    p_decision_started: decisionStarted,
+  });
+  if (error) throw error;
+}
+export async function completeAnalyticsSession(
+  clientSessionId: string,
+  anonymousUserId: string,
+) {
+  const { error } = await supabase.rpc("complete_analytics_session", {
+    p_session_id: clientSessionId,
+    p_anonymous_user_id: anonymousUserId,
+  });
   if (error) throw error;
 }
 export async function trackEvent(
@@ -90,7 +129,7 @@ export async function trackEvent(
     metadata?: object;
   } = {},
 ) {
-  void supabase
+  const { error } = await supabase
     .from("decision_events")
     .insert({
       anonymous_user_id: anonymousUserId,
@@ -100,6 +139,26 @@ export async function trackEvent(
       event_name: eventName,
       metadata: context.metadata ?? {},
     });
+  if (error) throw error;
+}
+export type ValidationResponse = {
+  easeScore: 1 | 2 | 3 | 4 | 5;
+  easierThanUsual: "easier" | "same" | "harder";
+  wouldUseAgain?: boolean;
+};
+export async function submitValidationResponse(
+  decisionSessionId: string,
+  anonymousUserId: string,
+  response: ValidationResponse,
+) {
+  const { error } = await supabase.rpc("submit_decision_validation", {
+    p_decision_session_id: decisionSessionId,
+    p_anonymous_user_id: anonymousUserId,
+    p_ease_score: response.easeScore,
+    p_easier_than_usual: response.easierThanUsual,
+    p_would_use_again: response.wouldUseAgain ?? null,
+  });
+  if (error) throw error;
 }
 export type ReviewDraft = {
   recommendation: "recommend" | "not_recommend";

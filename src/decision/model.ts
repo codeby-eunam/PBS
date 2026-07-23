@@ -26,6 +26,13 @@ export type DecisionSession = {
 };
 export const SESSION_KEY = "bos-decision-session-v2";
 export const ANONYMOUS_ID_KEY = "bos-anonymous-user-id";
+export const CLIENT_SESSION_ID_KEY = "bos-client-session-id";
+export const SYSTEM_LIST_IDS = {
+  allVendors: "00000000-0000-4000-8000-000000000001",
+  allFoods: "00000000-0000-4000-8000-000000000002",
+  allGames: "00000000-0000-4000-8000-000000000003",
+  allShoppings: "00000000-0000-4000-8000-000000000004",
+} as const;
 
 export function decisionStartMode(vendorCount: number) {
   if (vendorCount === 1) return "single" as const;
@@ -38,6 +45,14 @@ export function getAnonymousUserId() {
   if (existing) return existing;
   const id = crypto.randomUUID();
   localStorage.setItem(ANONYMOUS_ID_KEY, id);
+  return id;
+}
+
+export function getClientSessionId() {
+  const existing = sessionStorage.getItem(CLIENT_SESSION_ID_KEY);
+  if (existing) return existing;
+  const id = crypto.randomUUID();
+  sessionStorage.setItem(CLIENT_SESSION_ID_KEY, id);
   return id;
 }
 
@@ -56,13 +71,13 @@ export function buildSystemLists(vendors: Vendor[]): DecisionList[] {
   });
   return [
     make(
-      "all-vendors",
+      SYSTEM_LIST_IDS.allVendors,
       "ALL VENDORS",
       "Every active festival vendor.",
       vendors,
     ),
     make(
-      "all-foods",
+      SYSTEM_LIST_IDS.allFoods,
       "ALL FOODS",
       "All food, drink, and dessert vendors.",
       vendors.filter((vendor) =>
@@ -70,13 +85,13 @@ export function buildSystemLists(vendors: Vendor[]): DecisionList[] {
       ),
     ),
     make(
-      "all-games",
+      SYSTEM_LIST_IDS.allGames,
       "ALL GAMES",
       "Every game vendor at the festival.",
       vendors.filter((vendor) => vendor.vendorType === "game"),
     ),
     make(
-      "all-shoppings",
+      SYSTEM_LIST_IDS.allShoppings,
       "ALL SHOPPINGS",
       "Every shopping vendor at the festival.",
       vendors.filter((vendor) => vendor.vendorType === "shopping"),
