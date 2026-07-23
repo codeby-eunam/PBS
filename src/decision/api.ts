@@ -4,8 +4,9 @@ import type { DecisionList, DecisionSession } from "./model";
 export async function loadDecisionLists(): Promise<DecisionList[]> {
   const { data, error } = await supabase
     .from("lists")
-    .select("id,name,description,tags,list_vendors(vendor_id,sort_order)")
+    .select("id,name,description,tags,created_at,list_vendors(vendor_id,sort_order)")
     .eq("is_active", true)
+    .order("sort_order")
     .order("created_at");
   if (error) throw error;
   return (data ?? []).map((row: any) => ({
@@ -13,6 +14,7 @@ export async function loadDecisionLists(): Promise<DecisionList[]> {
     name: row.name,
     description: row.description ?? "",
     tags: row.tags ?? [],
+    createdAt: row.created_at,
     vendorIds: (row.list_vendors ?? [])
       .sort((a: any, b: any) => a.sort_order - b.sort_order)
       .map((item: any) => item.vendor_id),

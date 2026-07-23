@@ -11,6 +11,7 @@ export type DecisionList = {
   description: string;
   tags: string[];
   vendorIds: string[];
+  createdAt?: string;
 };
 export type DecisionSession = {
   id: string;

@@ -519,7 +519,13 @@ export function DecisionApp() {
   );
 }
 
-type SortOrder = "featured" | "most-vendors" | "fewest-vendors" | "name";
+type SortOrder =
+  | "featured"
+  | "newest"
+  | "oldest"
+  | "most-vendors"
+  | "fewest-vendors"
+  | "name";
 
 function Home({
   lists,
@@ -535,7 +541,7 @@ function Home({
   onRequest: (value: string, query: string) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<SortOrder>("featured");
+  const [sort, setSort] = useState<SortOrder>("newest");
   const [request, setRequest] = useState("");
   const [busy, setBusy] = useState(false);
   const [requestStatus, setRequestStatus] = useState("");
@@ -543,6 +549,14 @@ function Home({
   const systemLists = lists.filter((list) => list.tags.includes("all"));
   const sortedOtherLists = [...lists.filter((list) => !list.tags.includes("all"))].sort(
     (a, b) => {
+      if (sort === "newest") {
+        return Date.parse(b.createdAt ?? "1970-01-01") -
+          Date.parse(a.createdAt ?? "1970-01-01");
+      }
+      if (sort === "oldest") {
+        return Date.parse(a.createdAt ?? "1970-01-01") -
+          Date.parse(b.createdAt ?? "1970-01-01");
+      }
       if (sort === "most-vendors") return b.vendorIds.length - a.vendorIds.length;
       if (sort === "fewest-vendors") return a.vendorIds.length - b.vendorIds.length;
       if (sort === "name") return a.name.localeCompare(b.name);
@@ -644,6 +658,8 @@ function Home({
                 onChange={(e) => setSort(e.target.value as SortOrder)}
               >
                 <option value="featured">Featured</option>
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
                 <option value="most-vendors">Most vendors</option>
                 <option value="fewest-vendors">Fewest vendors</option>
                 <option value="name">Name (A–Z)</option>
