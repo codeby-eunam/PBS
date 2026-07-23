@@ -1,7 +1,18 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+} from "react";
+import { Truck } from "lucide-react";
 import type { Vendor } from "../types";
 import { useVendorCatalog } from "../hooks/useVendorCatalog";
 import { getVendorGalleryImages } from "../lib/vendors";
+import { FALLBACK_ACCENT_COLOR, getReadableTextColor, withAlpha } from "../lib/accentColor";
 import {
   advanceMatch,
   buildSystemLists,
@@ -971,31 +982,120 @@ function Tournament({
     .slice(0, 2)
     .map((id) => vendorMap.get(id))
     .filter(Boolean) as Vendor[];
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => setSelectedId(null), [session.tournamentRemaining]);
   if (candidates.length < 2) return <State title="Preparing the next match…" />;
+
+  const handleSelect = (id: string) => {
+    if (selectedId) return;
+    setSelectedId(id);
+    window.setTimeout(() => onPick(id), 180);
+  };
+
   return (
-    <section className="decision-screen">
+    <section className="decision-screen tournament-screen">
       <Back onClick={onBack} />
       <p className="eyebrow">Match · Round {session.round}</p>
       <h1>Choose one.</h1>
       <div className="match-grid">
         {candidates.map((v) => (
-          <article key={v.id}>
-            <VendorGallery vendor={v} compact />
-            <p>{v.cuisines.join(" · ") || v.vendorType}</p>
-            <h2>{v.name}</h2>
-            <b>{v.menuItems.slice(0, 2).join(" · ") || "Menu coming soon"}</b>
-            <Location vendor={v} />
-            <button onClick={() => onVendor(v.id)}>Vendor details</button>
-            <button className="decision-primary" onClick={() => onPick(v.id)}>
-              Choose {v.name}
-            </button>
-            <button className="text-button" onClick={() => onChoose(v.id)}>
-              End match with this vendor…
-            </button>
-          </article>
+          <MatchPanel
+            key={v.id}
+            vendor={v}
+            selected={selectedId === v.id}
+            muted={selectedId !== null && selectedId !== v.id}
+            onSelect={() => handleSelect(v.id)}
+            onVendor={() => onVendor(v.id)}
+            onChoose={() => onChoose(v.id)}
+          />
         ))}
+        <div
+          className="match-vs"
+          aria-hidden="true"
+          style={
+            {
+              "--vs-a": candidates[0]?.accentColor || FALLBACK_ACCENT_COLOR,
+              "--vs-b": candidates[1]?.accentColor || FALLBACK_ACCENT_COLOR,
+            } as CSSProperties
+          }
+        >
+          VS
+        </div>
       </div>
     </section>
+  );
+}
+
+function MatchPanel({
+  vendor,
+  selected,
+  muted,
+  onSelect,
+  onVendor,
+  onChoose,
+}: {
+  vendor: Vendor;
+  selected: boolean;
+  muted: boolean;
+  onSelect: () => void;
+  onVendor: () => void;
+  onChoose: () => void;
+}) {
+  const accent = vendor.accentColor || FALLBACK_ACCENT_COLOR;
+  const accentText = getReadableTextColor(accent);
+  const category = vendor.cuisines.join(" · ") || vendor.vendorType;
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect();
+    }
+  };
+  const withStop = (event: MouseEvent, action: () => void) => {
+    event.stopPropagation();
+    action();
+  };
+
+  return (
+    <article
+      className={`match-panel${selected ? " is-selected" : ""}${muted ? " is-muted" : ""}`}
+      style={
+        {
+          "--accent": accent,
+          "--accent-fg": accentText,
+          "--accent-ring": withAlpha(accent, 0.35),
+        } as CSSProperties
+      }
+      role="button"
+      tabIndex={0}
+      aria-label={`Choose ${vendor.name}`}
+      onClick={onSelect}
+      onKeyDown={handleKeyDown}
+    >
+      {vendor.featuredImageUrl ? (
+        <img className="match-panel-image" src={vendor.featuredImageUrl} alt="" loading="eager" />
+      ) : (
+        <div className="match-panel-fallback">
+          <Truck aria-hidden="true" />
+          <span>Community photo needed</span>
+        </div>
+      )}
+      <div className="match-panel-scrim" />
+      <span className="match-panel-badge">{category}</span>
+      <div className="match-panel-body">
+        <h2>{vendor.name}</h2>
+        <b>{vendor.menuItems.slice(0, 2).join(" · ") || "Menu coming soon"}</b>
+        <button className="match-panel-link" onClick={(event) => withStop(event, onVendor)}>
+          Vendor details
+        </button>
+      </div>
+      <button
+        className="match-panel-end text-button"
+        onClick={(event) => withStop(event, onChoose)}
+      >
+        End match with this vendor…
+      </button>
+    </article>
   );
 }
 

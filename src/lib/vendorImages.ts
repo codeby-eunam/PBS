@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { extractAccentColor, FALLBACK_ACCENT_COLOR } from './accentColor';
 
 const BUCKET = 'vendor-images';
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -8,7 +9,12 @@ const EXTENSIONS: Record<string, string> = {
   'image/webp': 'webp',
 };
 
-export type VendorImageResult = { imagePath: string; publicUrl: string };
+export type VendorImageResult = {
+  imagePath: string;
+  publicUrl: string;
+  accentColor: string;
+  accentColorSource: 'image' | 'fallback';
+};
 
 export async function uploadVendorImage(
   vendorId: string,
@@ -25,9 +31,20 @@ export async function uploadVendorImage(
     .upload(imagePath, file, { contentType: file.type, upsert: false });
   if (uploadError) throw uploadError;
 
+  // The image path always changes on upload, so the accent color is
+  // recalculated once here and reused from the database afterward.
+  const extracted = await extractAccentColor(file);
+  const accentColor = extracted ?? FALLBACK_ACCENT_COLOR;
+  const accentColorSource: 'image' | 'fallback' = extracted ? 'image' : 'fallback';
+
   const { error: updateError } = await supabase
     .from('vendors')
-    .update({ image_path: imagePath })
+    .update({
+      image_path: imagePath,
+      accent_color: accentColor,
+      accent_color_source: accentColorSource,
+      accent_color_updated_at: new Date().toISOString(),
+    })
     .eq('id', vendorId)
     .select('image_path')
     .single();
@@ -40,6 +57,8 @@ export async function uploadVendorImage(
   return {
     imagePath,
     publicUrl: supabase.storage.from(BUCKET).getPublicUrl(imagePath).data.publicUrl,
+    accentColor,
+    accentColorSource,
   };
 }
 

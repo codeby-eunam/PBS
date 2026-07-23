@@ -377,7 +377,6 @@ h3.decision-section-header {
   color: #6c655b;
 }
 .vendor-card button,
-.match-grid article > button,
 .result-actions button {
   border: 1px solid #d7d0c5;
   border-radius: 10px;
@@ -603,18 +602,11 @@ h3.decision-section-header {
   font-size: 20px;
 }
 .match-grid {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
   margin-top: 40px;
-}
-.match-grid article {
-  padding: 28px;
-  border: 1px solid #ddd7cc;
-  border-radius: 22px;
-  background: white;
-  display: grid;
-  gap: 14px;
 }
 .match-grid h2 {
   font-size: 30px;
@@ -623,6 +615,164 @@ h3.decision-section-header {
 .match-grid .text-button {
   border: 0;
   background: transparent;
+}
+.match-panel {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  min-height: 380px;
+  border-radius: 22px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #f1eee7;
+  border: 2px solid transparent;
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    opacity 0.18s ease;
+}
+.match-panel:hover {
+  border-color: var(--accent, #bd4d2a);
+  box-shadow: 0 14px 34px #3b28121f;
+}
+.match-panel:focus-visible {
+  outline: 3px solid var(--accent, #bd4d2a);
+  outline-offset: 3px;
+}
+.match-panel.is-selected {
+  border-color: var(--accent, #bd4d2a);
+  box-shadow: 0 0 0 5px var(--accent-ring, #bd4d2a59);
+  transform: scale(0.99);
+}
+.match-panel.is-muted {
+  opacity: 0.5;
+}
+.match-panel-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.match-panel-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background-color: #f7f1e7;
+  background-image: radial-gradient(#b8532f26 1.6px, transparent 1.6px);
+  background-size: 18px 18px;
+}
+.match-panel-fallback svg {
+  width: 44px;
+  height: 44px;
+  color: #b8532f;
+  opacity: 0.85;
+}
+.match-panel-fallback span {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #8a5236;
+  text-align: center;
+  padding: 0 20px;
+}
+.match-panel-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, #14100c 0%, #14100ca3 32%, transparent 60%);
+  pointer-events: none;
+}
+.match-panel-badge {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--accent, #bd4d2a);
+  color: var(--accent-fg, #fff);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.match-panel-body {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 20px;
+  display: grid;
+  gap: 4px;
+}
+.match-panel-body h2 {
+  margin: 0;
+  font-size: 26px;
+  color: #fff;
+}
+.match-panel-body b {
+  color: #ece7db;
+  font-size: 13px;
+  font-weight: 600;
+}
+.match-panel-link {
+  justify-self: start;
+  margin-top: 8px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--accent, #f2b26a);
+  font-weight: 800;
+  font-size: 13px;
+}
+.match-panel-link::after {
+  content: "\2039";
+  display: inline-block;
+  transform: rotate(180deg);
+  margin-left: 4px;
+}
+.match-panel-link:hover,
+.match-panel-link:focus-visible {
+  text-decoration: underline;
+}
+.match-panel-end {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #00000055;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.match-vs {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  pointer-events: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  color: #14100c;
+  font-weight: 900;
+  font-size: 13px;
+  box-shadow: 0 6px 18px #3b28123d;
+  border: 3px solid transparent;
+  background-image:
+    linear-gradient(#fff, #fff),
+    linear-gradient(135deg, var(--vs-a, #bd4d2a), var(--vs-b, #bd4d2a));
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
 }
 .winner-mark {
   width: 64px;
@@ -855,9 +1005,6 @@ h3.decision-section-header {
   .decision-state h1 {
     font-size: 42px;
   }
-  .match-grid article {
-    padding: 22px;
-  }
   .result-actions {
     grid-template-columns: 1fr;
   }
@@ -953,12 +1100,12 @@ h3.decision-section-header {
   .match-grid {
     margin-top: 28px;
   }
-  .match-grid article {
-    padding: 18px;
-  }
   .match-grid h2 {
     font-size: 26px;
     overflow-wrap: anywhere;
+  }
+  .match-panel {
+    min-height: 320px;
   }
   .visit-time-input {
     grid-template-columns: 1fr;
@@ -998,5 +1145,84 @@ h3.decision-section-header {
   }
   .reason-grid label {
     width: 100%;
+  }
+}
+
+/* Tournament matchup screen: sized to the current viewport so both panels
+   always fit without scrolling, regardless of device height. Selectors here
+   are scoped/ordered to win over the generic .decision-screen/.match-grid/
+   .match-panel rules above at every breakpoint. */
+.tournament-screen {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 68px);
+  max-height: calc(100dvh - 68px);
+  padding: 20px max(clamp(18px, 5vw, 56px), env(safe-area-inset-right))
+    max(14px, env(safe-area-inset-bottom))
+    max(clamp(18px, 5vw, 56px), env(safe-area-inset-left));
+  overflow: hidden;
+}
+.tournament-screen .decision-back {
+  flex-shrink: 0;
+}
+.tournament-screen .eyebrow {
+  flex-shrink: 0;
+}
+.tournament-screen h1 {
+  flex-shrink: 0;
+  font-size: clamp(22px, 5.5vw, 40px);
+  line-height: 1.02;
+  margin: 4px 0 12px;
+}
+.tournament-screen .match-grid {
+  flex: 1;
+  min-height: 0;
+  margin-top: 0;
+}
+.tournament-screen .match-panel {
+  height: 100%;
+  min-height: 0;
+  aspect-ratio: auto;
+}
+@media (max-width: 720px) {
+  .tournament-screen {
+    height: calc(100dvh - 60px);
+    max-height: calc(100dvh - 60px);
+    padding-top: 14px;
+  }
+  .tournament-screen .match-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+}
+@media (max-width: 480px) {
+  .tournament-screen {
+    height: calc(100dvh - 56px);
+    max-height: calc(100dvh - 56px);
+    padding-top: 12px;
+  }
+  .tournament-screen h1 {
+    font-size: clamp(20px, 7vw, 30px);
+    margin: 2px 0 10px;
+  }
+  .tournament-screen .match-panel-body {
+    padding: 14px;
+  }
+  .tournament-screen .match-panel-body h2 {
+    font-size: 20px;
+  }
+  .tournament-screen .match-panel-badge {
+    top: 12px;
+    left: 12px;
+    padding: 5px 10px;
+  }
+}
+@media (max-height: 640px) {
+  .tournament-screen .eyebrow {
+    display: none;
+  }
+  .tournament-screen h1 {
+    font-size: clamp(18px, 5vw, 26px);
+    margin: 2px 0 8px;
   }
 }

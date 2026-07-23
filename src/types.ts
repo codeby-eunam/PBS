@@ -56,6 +56,8 @@ export type Vendor = {
   source: string;
   isActive: boolean;
   imagePath?: string | null;
+  accentColor?: string;
+  accentColorSource?: "image" | "fallback" | "manual";
   featuredImageUrl?: string;
   galleryImageUrls?: string[];
   locationName?: string | null;

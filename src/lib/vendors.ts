@@ -37,6 +37,8 @@ type VendorRow = {
   is_active: boolean;
   sort_order: number;
   image_path: string | null;
+  accent_color: string;
+  accent_color_source: string;
   location_name: string | null;
   booth_number: string | null;
   zone: string | null;
@@ -88,6 +90,8 @@ function mapRows(rows: VendorRow[]): Vendor[] {
     source: row.source,
     isActive: row.is_active,
     imagePath: row.image_path,
+    accentColor: row.accent_color,
+    accentColorSource: row.accent_color_source as Vendor["accentColorSource"],
     locationName: row.location_name,
     boothNumber: row.booth_number,
     zone: row.zone,
